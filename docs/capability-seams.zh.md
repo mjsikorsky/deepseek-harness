@@ -9,6 +9,8 @@
 
 ```mermaid
 flowchart LR
+  pkg_host_open_in_app["host-open-in-app"]
+  svc_openInAppAccess["ctx.openInAppAccess<br/>Deployment native application resource authority"]
   pkg_agent["agent"]
   svc_agentLifecycleSetup["ctx.agentLifecycleSetup<br/>Deployment Agent publication authority"]
   pkg_agent_loop["agent-loop"]
@@ -277,6 +279,7 @@ flowchart LR
   pkg_host_directory_picker --> svc_directoryPicker
   pkg_host_directory_picker_browse --> svc_directoryPicker
   pkg_host_directory_picker_native --> svc_directoryPicker
+  pkg_host_open_in_app --> svc_openInAppAccess
   pkg_host_webserver --> svc_webServer
   pkg_inspector --> svc_inspector
   pkg_invariants --> svc_invariants
@@ -396,6 +399,7 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_openInAppAccess --> pkg_host_open_in_app
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
   svc_sandboxPolicy --> pkg_bash_sandbox
@@ -485,6 +489,7 @@ flowchart LR
 
 | ctx 键 | 角色 | 所属包 | 实现 | 直接消费方 | 配套插件 | 说明 |
 | --- | --- | --- | --- | --- | --- | --- |
+| `ctx.openInAppAccess` | `seam` | [`host-open-in-app`](../packages/host/open-in-app) | - | [`host-open-in-app`](../packages/host/open-in-app) | - | 部署提供者授权已安装应用的观察及一个规范化启动目录，并在每次启动尝试前检查当前权限。 |
 | `ctx.agentLifecycleSetup` | `seam` | [`agent`](../packages/core/agent) | - | [`agent-loop`](../packages/core/agent-loop) | - | 部署提供者在调用者设置之外准备尚未发布的 Agent，并在持久追加完成后、原生发布之前提交。 |
 | `ctx.gatewayAccess` | `seam` | [`api-gateway`](../packages/api/gateway) | - | [`api-gateway`](../packages/api/gateway) | - | 部署提供者接收有期限的传输租约，授权原生分派和投递，无需替换 RPC 或 mux 帧协议。 |
 | `ctx.sessionVisibility` | `seam` | [`api-session-controller`](../packages/api/session-controller) | - | [`api-session-controller`](../packages/api/session-controller) | - | 部署提供者在列表收集和搜索分页之前过滤原生 Session 身份。 |

@@ -52,6 +52,8 @@ interface Config {
 
 A request whose handling throws (a malformed %-escape hitting `decodeURIComponent`, a client dropping mid-body) is logged as a warning and answered 400 — or the socket destroyed when headers are already out — never a process exit. Disposal pairs `close()` with `closeAllConnections()` because a handler may hold its response open (SSE) and such connections never end on their own; without the force-close, teardown would hang. The package never prints: the URL line belongs to the shell. Per-package operational detail, including the dev-mode bundle watch pipeline, stays in the [README](../../packages/host/webserver/README.md).
 
+The [open-in-app route owner](../../packages/host/open-in-app/README.md) consumes `ctx.openInAppAccess` for deployment resource authorization. Its [`OpenInAppAccessRequest` and `OpenInAppOperation`](../../packages/host/open-in-app/src/access.ts) carry immutable HTTP facts and the parsed requested operation. The deployment's `OpenInAppAccessPolicy` verifies that request and returns an `OpenInAppAccessLease`: current-authority checks, cancellation, release, and one canonical directory for launch. The route retains native browser authentication and rechecks the granted target before each launcher attempt; the provider owns workspace and machine capability verification.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -59,6 +61,23 @@ A request whose handling throws (a malformed %-escape hitting `decodeURIComponen
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxopeninappaccess--openinappaccesspolicy"></a>
+
+### `ctx.openInAppAccess` — `OpenInAppAccessPolicy`
+
+Deployment-owned identity and resource policy, independent of native browser authentication.
+
+```ts cordis-catalog
+/**
+ * Verify the request and grant its parsed operation using trusted workspace/machine capabilities.
+ * @param request - immutable request facts and desired operation.
+ * @returns finite grant, or undefined to deny before native resource access.
+ */
+admit(request: OpenInAppAccessRequest): Promise<OpenInAppAccessLease | undefined>
+```
+
+Source: [`packages/host/open-in-app/src/access.ts`](../../packages/host/open-in-app/src/access.ts)
 
 <a id="ctxwebserver--webserver"></a>
 

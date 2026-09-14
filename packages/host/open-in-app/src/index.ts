@@ -8,7 +8,10 @@
  * `connection` service for a rejection first (`requestRejection`): its
  * Host/Origin fence defeats DNS rebinding and cross-site calls, and its
  * browser authentication (the login-token cookie) gates every caller before
- * any resolution result, icon, or launch is reachable. On top of that fence
+ * any resolution result, icon, or launch is reachable. A deployment may also
+ * require `openInAppAccess` resource grants for each operation; launch grants
+ * bind a canonical directory and are checked before each launch attempt.
+ * On top of those fences
  * the open route validates its body at the wire: an `application/json` media
  * type, a 64 KiB ceiling, string `app`/`path` fields, a resolved-available
  * catalog id, and an absolute path naming an existing directory.
@@ -28,6 +31,8 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { launchedThroughSsh, launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import z from '@deepseek-ai/schemastery'
+import { withOpenInAppAccess } from './access.ts'
+export type { OpenInAppAccessPolicy, OpenInAppAccessLease, OpenInAppAccessRequest, OpenInAppOperation } from './access.ts'
 import { OPEN_IN_APP_CATALOG, type OpenInAppApp } from './catalog.ts'
 import {
   launchResolved, resolveLaunch, resolveOpenInAppApps,
@@ -48,6 +53,8 @@ export const inject = ['webServer', 'connection', 'subprocess']
 
 /** Open-in-app host configuration. */
 export interface Config {
+  /** Require deployment resource authorization in addition to native browser authentication. @default false */
+  readonly requireAccessPolicy?: boolean
   /**
    * Per-command deadline in milliseconds for catalog-resolution host
    * commands (`xcode-select`, the Windows registry reads).
@@ -70,6 +77,7 @@ export interface Config {
 const boundedMs = (): z<number> => z.number().step(1).min(1).max(600_000).required()
 
 export const Config: z<Config> = z.object({
+  requireAccessPolicy: z.boolean().default(false),
   probeTimeoutMs: boundedMs(),
   iconTimeoutMs: boundedMs(),
   launchWatchMs: boundedMs(),
@@ -136,6 +144,8 @@ function parseOpenBody(text: string): { app: string; path: string } | null {
 
 /** Register the apps, icon, and open routes behind the connection trust fence. */
 export function apply(ctx: Context, config: Config): void {
+  const lifetime = new AbortController()
+  ctx.effect(() => () => { lifetime.abort() }, 'open-in-app: access lifetime')
   const ssh = launchedThroughSsh(launchEnvironmentOf(ctx))
   /** Test-seam facts completed with the composition's PATH resolver. */
   const catalogInternals = (): OpenInAppInternals => ({
@@ -199,7 +209,12 @@ export function apply(ctx: Context, config: Config): void {
         sendMethodNotAllowed(res, 'GET')
         return
       }
-      sendJson(res, 200, { apps: [...(await availability()).keys()] })
+      await withOpenInAppAccess(ctx.get('openInAppAccess'), config.requireAccessPolicy === true, lifetime.signal,
+        req, res, { kind: 'catalog' }, async (check) => {
+          const apps = [...(await availability()).keys()]
+          await check()
+          sendJson(res, 200, { apps })
+        })
     },
   }), `open-in-app: GET ${OPEN_IN_APP_APPS_ROUTE}`)
 
@@ -221,20 +236,27 @@ export function apply(ctx: Context, config: Config): void {
         noIcon()
         return
       }
-      const resolved = (await availability()).get(app.id)
-      if (resolved === undefined) {
-        noIcon()
-        return
-      }
-      const icon = await iconOf(app, resolved)
-      if (icon === null) {
-        noIcon()
-        return
-      }
-      res.statusCode = 200
-      res.setHeader('content-type', icon.contentType)
-      res.setHeader('cache-control', 'public, max-age=3600')
-      res.end(icon.bytes)
+      const policy = ctx.get('openInAppAccess')
+      await withOpenInAppAccess(policy, config.requireAccessPolicy === true, lifetime.signal,
+        req, res, { kind: 'icon', appId: app.id }, async (check) => {
+          const resolved = (await availability()).get(app.id)
+          await check()
+          if (resolved === undefined) {
+            noIcon()
+            return
+          }
+          await check()
+          const icon = await iconOf(app, resolved)
+          await check()
+          if (icon === null) {
+            noIcon()
+            return
+          }
+          res.statusCode = 200
+          res.setHeader('content-type', icon.contentType)
+          res.setHeader('cache-control', policy === undefined ? 'public, max-age=3600' : 'no-store')
+          res.end(icon.bytes)
+        })
     },
   }), `open-in-app: GET ${OPEN_IN_APP_ICON_PREFIX}/<id>`)
 
@@ -271,41 +293,50 @@ export function apply(ctx: Context, config: Config): void {
         sendJson(res, 400, { code: 'bad-request', message: 'request body must be JSON with string "app" and "path"' })
         return
       }
-      const app = OPEN_IN_APP_CATALOG.find(entry => entry.id === parsed.app)
-      const resolved = app === undefined ? undefined : (await availability()).get(app.id)
-      if (app === undefined || resolved === undefined) {
-        sendJson(res, 400, { code: 'bad-request', message: `unknown or unavailable app: ${parsed.app}` })
-        return
-      }
       if (parsed.path === '' || !isAbsolute(parsed.path)) {
         sendJson(res, 400, { code: 'bad-request', message: 'path must be an absolute directory path' })
         return
       }
-      let directory: boolean
-      try {
-        directory = (await stat(parsed.path)).isDirectory()
-      } catch {
-        // Swallows ENOENT/EACCES: both mean there is no directory to open.
-        directory = false
-      }
-      if (!directory) {
-        sendJson(res, 404, { code: 'not-found', message: `directory does not exist: ${parsed.path}` })
-        return
-      }
-      let outcome = await launchResolved(resolved, parsed.path, config.launchWatchMs, catalogInternals())
-      if (outcome === 'missing') {
-        // The verified launcher is gone (uninstalled since resolution):
-        // refresh this one entry and retry once with the fresh launcher.
-        const fresh = await refreshResolution(app)
-        outcome = fresh === undefined
-          ? 'failed'
-          : await launchResolved(fresh, parsed.path, config.launchWatchMs, catalogInternals())
-      }
-      if (outcome === 'launched') {
-        sendJson(res, 200, { ok: true })
-      } else {
-        sendJson(res, 502, { code: 'launch-failed', message: `failed to launch ${app.id}` })
-      }
+      await withOpenInAppAccess(ctx.get('openInAppAccess'), config.requireAccessPolicy === true, lifetime.signal,
+        req, res, { kind: 'launch', appId: parsed.app, directory: parsed.path }, async (check, directory) => {
+          if (directory === undefined) throw new Error('Launch directory missing')
+          const app = OPEN_IN_APP_CATALOG.find(entry => entry.id === parsed.app)
+          const resolved = app === undefined ? undefined : (await availability()).get(app.id)
+          await check()
+          if (app === undefined || resolved === undefined) {
+            sendJson(res, 400, { code: 'bad-request', message: `unknown or unavailable app: ${parsed.app}` })
+            return
+          }
+          await check()
+          let isDirectory: boolean
+          try {
+            isDirectory = (await stat(directory)).isDirectory()
+          } catch {
+            // Swallows ENOENT/EACCES: both mean there is no directory to open.
+            isDirectory = false
+          }
+          await check()
+          if (!isDirectory) {
+            sendJson(res, 404, { code: 'not-found', message: `directory does not exist: ${directory}` })
+            return
+          }
+          let outcome = await launchResolved(resolved, directory, config.launchWatchMs, catalogInternals(), check)
+          if (outcome === 'missing') {
+            // The verified launcher is gone (uninstalled since resolution):
+            // refresh this one entry and retry once with the fresh launcher.
+            await check()
+            const fresh = await refreshResolution(app)
+            outcome = fresh === undefined
+              ? 'failed'
+              : await launchResolved(fresh, directory, config.launchWatchMs, catalogInternals(), check)
+          }
+          await check()
+          if (outcome === 'launched') {
+            sendJson(res, 200, { ok: true })
+          } else {
+            sendJson(res, 502, { code: 'launch-failed', message: `failed to launch ${app.id}` })
+          }
+        })
     },
   }), `open-in-app: POST ${OPEN_IN_APP_OPEN_ROUTE}`)
 }

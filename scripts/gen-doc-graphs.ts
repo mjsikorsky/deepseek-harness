@@ -99,6 +99,14 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'openInAppAccess',
+    pkg: 'host-open-in-app',
+    title: 'Deployment native application resource authority',
+    mode: 'seam',
+    consumers: ['host-open-in-app'],
+    note: 'Deployment providers grant installed-app observations and one canonical launch directory with current authority checks before every launcher attempt.',
+  },
+  {
     key: 'agentLifecycleSetup',
     pkg: 'agent',
     title: 'Deployment Agent publication authority',

@@ -16,6 +16,8 @@ SessionController consults its visibility provider before native list collection
 
 The native Client socket factory preserves Remote mux framing while letting a shell acquire fresh per-attempt admission. Cancellation closes late asynchronous factory results. [DeepTail](https://github.com/d4551/DeepTail) at `69696916832b02c0ecdd9ce625aeae93c7787cfc` (MIT) documented this missing physical-carrier extension; the implementation adds the native hook rather than copying its application transport.
 
+Open-in-app authorizes host resource observations at its own native route owner. A deployment lease grants one canonical launch target; every primary, fallback and refreshed attempt rechecks that target and current authority. Keeping the policy beside the launcher prevents a native fallback from escaping a route-only check. Browser authentication alone does not authorize a workspace directory or host-machine action. Admission ownership covers both late fulfillment and cancellation during promise handoff.
+
 ## Alternatives considered
 
 Replacing the RPC parser or mirroring Sessions creates competing native behavior. Post-result filtering cannot protect pre-publication events or restore search results already excluded by pagination. Caller-only setup misses direct configured Agents. These approaches were rejected.

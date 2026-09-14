@@ -52,6 +52,8 @@ interface Config {
 
 处理过程中抛出异常的请求（畸形的 % 转义撞上 `decodeURIComponent`、客户端在请求体中途断开）会记录为警告并应答 400（响应头已发出时则销毁 socket），绝不导致进程退出。dispose（资源释放）把 `close()` 与 `closeAllConnections()` 配对使用，因为处理器可能像 SSE（Server-Sent Events）那样保持响应打开，而这类连接永远不会自行结束；没有强制关闭，拆卸就会挂起。该包从不打印输出：URL 行归 shell 所有。逐包运维细节（含开发模式的 bundle 监视流水线）留在 [README](../../packages/host/webserver/README.zh.md) 中。
 
+[open-in-app 路由所有者](../../packages/host/open-in-app/README.zh.md) 使用 `ctx.openInAppAccess` 执行部署资源授权。其 [`OpenInAppAccessRequest` 和 `OpenInAppOperation`](../../packages/host/open-in-app/src/access.ts) 携带不可变的 HTTP 事实及解析后的请求操作。部署的 `OpenInAppAccessPolicy` 验证请求并返回 `OpenInAppAccessLease`：当前权限检查、取消、释放，以及启动时使用的一个规范化目录。路由保留原生浏览器认证，并在每次启动尝试之前重新检查获准目标；提供者负责验证工作区和机器能力。
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -59,6 +61,23 @@ interface Config {
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxopeninappaccess--openinappaccesspolicy"></a>
+
+### `ctx.openInAppAccess` — `OpenInAppAccessPolicy`
+
+Deployment-owned identity and resource policy, independent of native browser authentication.
+
+```ts cordis-catalog
+/**
+ * Verify the request and grant its parsed operation using trusted workspace/machine capabilities.
+ * @param request - immutable request facts and desired operation.
+ * @returns finite grant, or undefined to deny before native resource access.
+ */
+admit(request: OpenInAppAccessRequest): Promise<OpenInAppAccessLease | undefined>
+```
+
+Source: [`packages/host/open-in-app/src/access.ts`](../../packages/host/open-in-app/src/access.ts)
 
 <a id="ctxwebserver--webserver"></a>
 

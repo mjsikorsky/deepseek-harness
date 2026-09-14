@@ -9,7 +9,7 @@
  * composition); the filesystem is real.
  */
 
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, symlink, rename, writeFile } from 'node:fs/promises'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -48,7 +48,10 @@ function pathTable(entries: Record<string, string> = {}): (name: string) => Prom
 }
 
 /** Boot webserver + open-in-app rows through the real Loader. */
-async function boot(layers: readonly LaunchEnvironmentLayerInput[] = []): Promise<string> {
+async function boot(
+  layers: readonly LaunchEnvironmentLayerInput[] = [],
+  policy?: { required: boolean; provider?: OpenInApp.OpenInAppAccessPolicy },
+): Promise<string> {
   internals.catalog = { env: {}, ...internals.catalog }
   root = await mkdtemp(join(tmpdir(), 'dsh-open-in-app-loader-'))
   const configPath = join(root, 'cordis.yml')
@@ -62,10 +65,12 @@ async function boot(layers: readonly LaunchEnvironmentLayerInput[] = []): Promis
     '    probeTimeoutMs: 5000',
     '    iconTimeoutMs: 5000',
     '    launchWatchMs: 1000',
+    `    requireAccessPolicy: ${String(policy?.required ?? false)}`,
     '',
   ].join('\n'))
 
   context = new Context()
+  if (policy?.provider !== undefined) context.provide('openInAppAccess', policy.provider)
   context.provide(DSH_LAUNCH_ENVIRONMENT_KEY, createLaunchEnvironmentSnapshot(layers))
   context.baseUrl = pathToFileURL(root).href + '/'
   context.provide('connection', { requestRejection: () => trust.rejection } as never)
@@ -488,5 +493,94 @@ describe('open-in-app host routes (real Loader composition)', () => {
     expect((await fetch(`${base}/open-in-app/apps`)).status).toBe(404)
     expect((await fetch(`${base}/open-in-app/icon/cursor`)).status).toBe(404)
     expect((await fetch(`${base}/open-in-app/open`, { method: 'POST' })).status).toBe(404)
+  })
+})
+
+
+describe('deployment resource authority (native Loader and HTTP)', () => {
+  const post = (base: string, path: string) => fetch(`${base}/open-in-app/open`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ app: 'cursor', path }),
+  })
+
+  it('requires a provider before catalog or launch observations and retains the native cookie fence', async () => {
+    const resolve = vi.fn(pathTable())
+    internals.catalog = { platform: 'darwin', applicationRoots: [], resolveExecutable: resolve }
+    const base = await boot([], { required: true })
+    expect((await fetch(`${base}/open-in-app/apps`)).status).toBe(403)
+    expect((await fetch(`${base}/open-in-app/icon/cursor`)).status).toBe(403)
+    expect((await post(base, '/ungranted/foreign')).status).toBe(403)
+    expect(resolve).not.toHaveBeenCalled()
+    trust.rejection = 401
+    expect((await fetch(`${base}/open-in-app/apps`)).status).toBe(401)
+  })
+
+  it('denies a foreign target before discovery and launches only the granted canonical directory', async () => {
+    const launches: string[][] = []
+    let canonical = ''
+    let accepted = ''
+    const release = vi.fn()
+    const controller = new AbortController()
+    const base = await boot([], { required: true, provider: {
+      async admit(request) {
+        expect(Object.isFrozen(request.operation)).toBe(true)
+        if (request.operation.kind !== 'launch' || request.operation.directory !== accepted) return undefined
+        return { signal: controller.signal, canonicalDirectory: canonical, async check() {}, release }
+      },
+    } })
+    await cursorBundle(root!)
+    darwinFixture(root!, launches)
+    canonical = await realpath(root!)
+    // The owner still validates ordinary syntax before requesting a grant.
+    expect((await post(base, 'ACCEPTED_ALIAS')).status).toBe(400)
+    expect((await post(base, '/foreign/workspace')).status).toBe(403)
+    expect(launches).toEqual([])
+    accepted = root!
+    expect((await post(base, root!)).status).toBe(200)
+    expect(launches).toHaveLength(1)
+    expect(launches[0]).toContain(canonical)
+    expect(release).toHaveBeenCalledOnce()
+  })
+
+  it('revokes while discovery waits without launching or retaining the request grant', async () => {
+    const entered = Promise.withResolvers<undefined>()
+    const waiting = Promise.withResolvers<{ stdout: string; stderr: string }>()
+    const controller = new AbortController()
+    const release = vi.fn()
+    const launches: string[][] = []
+    let canonical = ''
+    const base = await boot([], { required: true, provider: {
+      async admit() { return { signal: controller.signal, canonicalDirectory: canonical, async check() {}, release } },
+    } })
+    await cursorBundle(root!)
+    darwinFixture(root!, launches)
+    canonical = await realpath(root!)
+    internals.catalog.run = () => { entered.resolve(undefined); return waiting.promise }
+    const response = post(base, root!)
+    await entered.promise
+    controller.abort(new Error('membership revoked'))
+    expect((await response).status).toBe(403)
+    expect(release).toHaveBeenCalledOnce()
+    waiting.resolve({ stdout: '', stderr: '' })
+    expect(launches).toEqual([])
+  })
+
+  it('rejects a grant whose canonical directory was replaced by a foreign symlink', async () => {
+    let canonical = ''
+    const controller = new AbortController()
+    const base = await boot([], { required: true, provider: {
+      async admit() { return { signal: controller.signal, canonicalDirectory: canonical, async check() {}, release() {} } },
+    } })
+    const launches: string[][] = []
+    await cursorBundle(root!)
+    darwinFixture(root!, launches)
+    const target = join(root!, 'target')
+    const foreign = join(root!, 'foreign')
+    await mkdir(target)
+    await mkdir(foreign)
+    canonical = await realpath(target)
+    await rename(target, join(root!, 'previous'))
+    await symlink(foreign, target, 'dir')
+    expect((await post(base, target)).status).toBe(403)
+    expect(launches).toEqual([])
   })
 })

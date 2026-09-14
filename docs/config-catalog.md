@@ -934,6 +934,8 @@ Requires: `webServer` · `connection` · `subprocess`
 ```ts config-catalog
 /** Open-in-app host configuration. */
 export interface Config {
+  /** Require deployment resource authorization in addition to native browser authentication. @default false */
+  readonly requireAccessPolicy?: boolean
   /**
    * Per-command deadline in milliseconds for catalog-resolution host
    * commands (`xcode-select`, the Windows registry reads).
@@ -954,7 +956,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/host/open-in-app/src/index.ts:50`](../packages/host/open-in-app/src/index.ts)
+Source: [`packages/host/open-in-app/src/index.ts:55`](../packages/host/open-in-app/src/index.ts)
 
 <a id="deepseek-aidsh-host-webserver"></a>
 

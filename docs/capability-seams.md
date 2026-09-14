@@ -7,6 +7,8 @@ A service can be a core spine service, a swappable capability seam, or a bundle/
 
 ```mermaid
 flowchart LR
+  pkg_host_open_in_app["host-open-in-app"]
+  svc_openInAppAccess["ctx.openInAppAccess<br/>Deployment native application resource authority"]
   pkg_agent["agent"]
   svc_agentLifecycleSetup["ctx.agentLifecycleSetup<br/>Deployment Agent publication authority"]
   pkg_agent_loop["agent-loop"]
@@ -275,6 +277,7 @@ flowchart LR
   pkg_host_directory_picker --> svc_directoryPicker
   pkg_host_directory_picker_browse --> svc_directoryPicker
   pkg_host_directory_picker_native --> svc_directoryPicker
+  pkg_host_open_in_app --> svc_openInAppAccess
   pkg_host_webserver --> svc_webServer
   pkg_inspector --> svc_inspector
   pkg_invariants --> svc_invariants
@@ -394,6 +397,7 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_openInAppAccess --> pkg_host_open_in_app
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
   svc_sandboxPolicy --> pkg_bash_sandbox
@@ -483,6 +487,7 @@ flowchart LR
 
 | ctx key | Role | Owner | Implementations | Direct consumers | Companion plugins | Note |
 | --- | --- | --- | --- | --- | --- | --- |
+| `ctx.openInAppAccess` | `seam` | [`host-open-in-app`](../packages/host/open-in-app) | - | [`host-open-in-app`](../packages/host/open-in-app) | - | Deployment providers grant installed-app observations and one canonical launch directory with current authority checks before every launcher attempt. |
 | `ctx.agentLifecycleSetup` | `seam` | [`agent`](../packages/core/agent) | - | [`agent-loop`](../packages/core/agent-loop) | - | Deployment providers prepare an unpublished Agent alongside caller setup and commit after durable appends, immediately before native publication. |
 | `ctx.gatewayAccess` | `seam` | [`api-gateway`](../packages/api/gateway) | - | [`api-gateway`](../packages/api/gateway) | - | Deployment providers admit finite carrier leases and authorize native dispatch and delivery without replacing RPC or mux framing. |
 | `ctx.sessionVisibility` | `seam` | [`api-session-controller`](../packages/api/session-controller) | - | [`api-session-controller`](../packages/api/session-controller) | - | Deployment providers filter native Session identities before list collection and search pagination. |

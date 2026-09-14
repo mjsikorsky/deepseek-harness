@@ -758,15 +758,19 @@ async function runLaunch(
  * @param watchMs - early-failure watch window per launcher (a child still
  * running when it closes counts as launched and keeps running).
  * @param internals - launcher hook for deterministic tests.
+ * @param beforeLaunch - deployment checkpoint before each primary or fallback attempt on the same granted path.
  * @returns how the attempt ended; `missing` when a tried launcher's
  *   executable is gone, which tells the caller to re-resolve once.
  */
 export async function launchResolved(
   resolved: OpenInAppResolvedLaunch, path: string, watchMs: number, internals: OpenInAppInternals = {},
+  beforeLaunch?: () => Promise<void>,
 ): Promise<OpenInAppLaunchOutcome> {
   const completed = resolveInternals(internals)
+  await beforeLaunch?.()
   const primary = await runLaunch(resolved.launch, path, watchMs, completed)
   if (primary === 'launched' || resolved.fallbackLaunch === undefined) return primary
+  await beforeLaunch?.()
   const fallback = await runLaunch(resolved.fallbackLaunch, path, watchMs, completed)
   if (fallback === 'launched') return 'launched'
   // Either tried launcher having vanished is grounds to refresh the resolution.

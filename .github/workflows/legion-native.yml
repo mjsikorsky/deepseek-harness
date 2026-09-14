@@ -47,6 +47,8 @@ jobs:
           packages/session-query/session-log-export/tests/route.host.spec.ts
           packages/api/session-controller/tests/session-search.host.spec.ts
           packages/api/session-controller/tests/session-list-blank.host.spec.ts
+          packages/host/open-in-app/tests/host-routes.spec.ts
+          packages/host/open-in-app/tests/access.spec.ts
           --maxWorkers=1 --no-file-parallelism
       - name: Native documentation consistency
         run: pnpm run doc-sync

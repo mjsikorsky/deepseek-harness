@@ -1368,6 +1368,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'openInAppAccess',
+    summary: 'Deployment-owned identity and resource policy, independent of native browser authentication.',
+    description: 'Deployment-owned identity and resource policy, independent of native browser authentication.',
+    methods: [
+      {
+        signature: 'admit(request: OpenInAppAccessRequest): Promise<OpenInAppAccessLease | undefined>',
+        description: 'Verify the request and grant its parsed operation using trusted workspace/machine capabilities.',
+        parameters: [{ name: 'request', description: 'immutable request facts and desired operation.' }],
+        returns: 'finite grant, or undefined to deny before native resource access.',
+      },
+    ],
+  },
+  {
     key: 'permissionPresets',
     summary: 'Owns the deployment\'s permission presets and their write path.',
     description: 'Owns the deployment\'s permission presets and their write path. Requires a confining `ctx.shell` executor and `ctx.approval`; unmatched knob values are reported as CUSTOM_PRESET, not an error.',
@@ -4796,6 +4809,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OneShotSubagentDescriptorData',
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
+  },
+  {
+    name: 'OpenInAppAccessLease',
+    declaration: 'export interface OpenInAppAccessLease {\n    readonly signal: AbortSignal;\n    readonly canonicalDirectory?: string;\n    check(): Promise<void>;\n    release(): void;\n}',
+  },
+  {
+    name: 'OpenInAppAccessRequest',
+    declaration: 'export interface OpenInAppAccessRequest {\n    readonly method: string;\n    readonly url: string;\n    readonly headers: Readonly<Record<string, string | readonly string[] | undefined>>;\n    readonly operation: OpenInAppOperation;\n    readonly signal: AbortSignal;\n}',
+  },
+  {
+    name: 'OpenInAppOperation',
+    declaration: 'export type OpenInAppOperation = {\n    readonly kind: \'catalog\';\n} | {\n    readonly kind: \'icon\';\n    readonly appId: string;\n} | {\n    readonly kind: \'launch\';\n    readonly appId: string;\n    readonly directory: string;\n};',
   },
   {
     name: 'OptionalSessionSeq',
