@@ -6,6 +6,10 @@
 
 源码：[`packages/session-query/session-query/src/types.ts`](../../packages/session-query/session-query/src/types.ts)
 
+## 导出可见性
+
+[Session 导出包](../../packages/session-query/session-log-export/README.zh.md) 通过捕获的读取器使用现有 SessionController 可见性能力。ZIP 生成过程可以比初始调用栈活得更久，而读取器仍保留有限的请求权限。谱系仅用于发现：每次读取后代 Session 及其引用的附件，都必须重新确认当前 Session 可见性。没有提供者时保留单一所有者行为；已安装提供者却无法捕获读取器时，导出被拒绝。
+
 ## 逻辑记录
 
 `SessionRecord` 由全语料库列表返回。它除了克隆的、优先取自 live 源的 header 外，还单独公开各源的可用性。`SessionEventRecord` 是轻量的原始日志投影；分类使用与模型历史推导相同的 `foldSurface()` 状态转换。

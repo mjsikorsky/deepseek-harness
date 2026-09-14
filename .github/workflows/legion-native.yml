@@ -50,6 +50,15 @@ jobs:
           packages/host/open-in-app/tests/host-routes.spec.ts
           packages/host/open-in-app/tests/access.spec.ts
           --maxWorkers=1 --no-file-parallelism
+      - name: Native Host approval, export, search, and SDK fixture regressions
+        run: >-
+          pnpm exec vitest run
+          packages/extensions/cordis-host-runner/tests/admission.spec.ts
+          packages/extensions/cordis-client-runner/tests/orchestrator.client.spec.ts
+          packages/session-query/session-log-export/tests/archive.host.spec.ts
+          packages/fs/tool-fs-search/tests/tools.spec.ts
+          packages/test-support/session-snapshot/tests/harness.spec.ts
+          --maxWorkers=1 --no-file-parallelism
       - name: Native documentation consistency
         run: pnpm run doc-sync
       - name: Native package hygiene
@@ -62,7 +71,21 @@ jobs:
         run: >-
           pnpm exec vitest run --config vitest.snapshot.config.ts
           snapshots/sdk/sdk.snapshot.ts
-          -t 'replays (text-turn|multi-turn|subagent-continuable) through'
+          -t 'replays (text-turn|multi-turn|subagent-continuable|deployment-termination) through'
+          --maxWorkers=1 --no-file-parallelism
+      - name: Recorded Session corpus invariants
+        run: >-
+          pnpm exec vitest run --config vitest.snapshot.config.ts
+          scripts/session-snapshot-corpus.corpus.ts
+          --maxWorkers=1 --no-file-parallelism
+      - name: Install Playwright Chromium and hosted dependencies
+        run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install --with-deps chromium
+      - name: Native built-browser Host approval and revocation
+        env:
+          DSH_SNAPSHOT: replay
+        run: >-
+          pnpm exec vitest run --config vitest.web.config.ts
+          apps/web/tests/cordis-host-authority.e2e.ts
           --maxWorkers=1 --no-file-parallelism
       - name: Built SDK scope ownership
         run: >-
@@ -77,7 +100,7 @@ jobs:
         run: python -m pip install 'pydantic>=2.12,<3'
       - name: Python SDK lifecycle projections against the built native CLI
         env:
-          PYTHONPATH: ${{ github.workspace }}/python/sdk/src
+          PYTHONPATH: ${{ github.workspace }}/python/sdk/src:${{ github.workspace }}/python/sdk-runtime/src
         run: |
           python scripts/smoke-python-runtime.py --scenario sdk-restart --exe "$GITHUB_WORKSPACE/apps/cli/lib/bin.js"
           python scripts/smoke-python-runtime.py --scenario sdk-snapshot --exe "$GITHUB_WORKSPACE/apps/cli/lib/bin.js"

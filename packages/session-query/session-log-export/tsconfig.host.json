@@ -10,6 +10,7 @@
     "src/index.ts"
   ],
   "references": [
+    { "path": "../../api/session-controller/tsconfig.host.json" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../attachment/attachment" },

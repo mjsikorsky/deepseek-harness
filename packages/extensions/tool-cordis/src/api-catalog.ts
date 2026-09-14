@@ -106,9 +106,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Deployment-owned setup composed with every caller\'s existing Agent setup.',
     methods: [
       {
-        signature: 'prepare(agentCtx: Context, agent: Agent): ReturnType<AgentSetup>',
+        signature: 'prepare( agentCtx: Context, agent: Agent, capabilities: Readonly<{ terminate: () => void; parent: Agent | undefined }>, ): ReturnType<AgentSetup>',
         description: 'Prepare authority and durable references while the Agent is unpublished. Preserve caller presets and tools. Register rollback through agentCtx. A returned commit executes after persistence settles, immediately before publication.',
-        parameters: [{ name: 'agentCtx', description: 'unpublished Agent scope owning prepared effects.' }, { name: 'agent', description: 'unpublished Agent being composed.' }],
+        parameters: [{ name: 'agentCtx', description: 'unpublished Agent scope owning prepared effects.' }, { name: 'agent', description: 'unpublished Agent being composed.' }, { name: 'capabilities', description: 'immutable factory-owned parent reference and exact lifecycle termination. The parent is the explicit creation/resume parent, never ambient initiator attribution. Termination revokes authority. Stops the Agent synchronously, preserves queued inbox messages, then drains persistence and removes both live registry entries. Returns void so a pre-step listener cannot await its own completion; the factory observes asynchronous teardown failures. Repeated calls are inert, including after the same Session is resumed as a different Agent.' }],
         returns: 'optional publication commit, after preparation finishes.',
       },
     ],
@@ -739,6 +739,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'start', description: 'first surface seq, inclusive.' }, { name: 'end', description: 'last surface seq, inclusive.' }, { name: 'agent', description: 'context whose session is mutated and whose routing options guide summarization.' }, { name: 'signal', description: 'optional cancellation; model-backed implementations must forward it.' }],
         returns: 'the appended event seqs, summary, replaced range, and token accounting.',
         throws: ['when compaction is active or the range is missing, reversed, or unbalanced.'],
+      },
+    ],
+  },
+  {
+    key: 'cordisHostActivationPolicy',
+    summary: 'Deployment provider; a session write permission is not permission to trust Host code.',
+    description: 'Deployment provider; a session write permission is not permission to trust Host code.',
+    methods: [
+      {
+        signature: 'authorize(request: Readonly<CordisHostActivationRequest>, signal: AbortSignal): Promise<CordisHostActivationLease | undefined>',
+        description: 'Authorize exact Host source using current verified approver privileges.',
+        parameters: [{ name: 'request', description: 'Native identity and immutable source snapshot.' }, { name: 'signal', description: 'Native stop, undefine and runner-disposal cancellation.' }],
+        returns: 'A finite admission, or undefined to deny.',
       },
     ],
   },
@@ -2038,9 +2051,15 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   },
   {
     key: 'sessionVisibility',
-    summary: 'Deployment-owned visibility before native list/search pagination.',
-    description: 'Deployment-owned visibility before native list/search pagination.',
+    summary: 'Deployment-owned live visibility and finite readers for detached consumers.',
+    description: 'Deployment-owned live visibility and finite readers for detached consumers.',
     methods: [
+      {
+        signature: 'capture?(): Readonly<SessionVisibilityReader> | undefined',
+        description: 'Capture before returning a stream; absence denies detached export consumers.',
+        parameters: [],
+        returns: 'a reader bound to the current finite request, or undefined without authority.',
+      },
       {
         signature: 'canRead(sessionId: SessionId, signal?: AbortSignal): Promise<boolean>',
         description: 'Check the current invocation\'s authority against this exact native Session.',
@@ -4019,6 +4038,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type CordisDynamicRunMode = \'run\' | \'update\';',
   },
   {
+    name: 'CordisHostActivationLease',
+    declaration: 'export interface CordisHostActivationLease {\n    readonly expiresAt: number;\n    readonly signal: AbortSignal;\n    check(): void;\n    release(): void;\n}',
+  },
+  {
+    name: 'CordisHostActivationRequest',
+    declaration: 'export interface CordisHostActivationRequest {\n    readonly sessionId: SessionId;\n    readonly pluginId: CordisDynamicPluginId;\n    readonly packageId: CordisDynamicPackageId;\n    readonly pluginRunId: CordisDynamicPluginRunId;\n    readonly hostCode: string;\n    readonly name: string;\n    readonly purpose: string;\n}',
+  },
+  {
     name: 'CordisInspectQueryRequest',
     declaration: 'export interface CordisInspectQueryRequest {\n    requestId: CordisInspectRequestId;\n    agentId: SessionId;\n    provider: string;\n    method: string;\n    input?: JsonValue;\n}',
   },
@@ -4232,7 +4259,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DynamicCordisRunRequest',
-    declaration: 'export interface DynamicCordisRunRequest {\n    requestId: ApprovalRequestId;\n    agentId: SessionId;\n    pluginId: CordisDynamicPluginId;\n    packageId: CordisDynamicPackageId;\n    mode: CordisDynamicRunMode;\n    name: string;\n    purpose: string;\n    requiresApproval: boolean;\n}',
+    declaration: 'export interface DynamicCordisRunRequest {\n    hasClientHalf?: boolean;\n    requestId: ApprovalRequestId;\n    agentId: SessionId;\n    pluginId: CordisDynamicPluginId;\n    packageId: CordisDynamicPackageId;\n    mode: CordisDynamicRunMode;\n    name: string;\n    purpose: string;\n    requiresApproval: boolean;\n}',
   },
   {
     name: 'EditGoalRequest',
@@ -5593,6 +5620,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionUpdateQueueValue',
     declaration: 'export interface SessionUpdateQueueValue {\n    readonly accepted: true;\n}',
+  },
+  {
+    name: 'SessionVisibilityReader',
+    declaration: 'export interface SessionVisibilityReader {\n    canRead(sessionId: SessionId, signal?: AbortSignal): Promise<boolean>;\n}',
   },
   {
     name: 'SessionWireEvent',

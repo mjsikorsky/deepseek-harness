@@ -42,6 +42,13 @@ import { resolveExampleLaunch } from '@deepseek-ai/dsh-loader-smoke'
 
 const EXIT_MARKER_GRACE_MS = 250
 
+// Authored fixtures resolve first. Only this package's declared runtime dependencies
+// may supply a fallback; CLI development dependencies are not production plugins.
+const snapshotManifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+  dependencies: Record<string, string>
+}
+const snapshotDependencies = new Set(Object.keys(snapshotManifest.dependencies))
+
 /** Loader fields needed while rebasing authored relative module names. */
 interface ProfilePatchEntry {
   name: string
@@ -375,9 +382,10 @@ function barePackageName(specifier: string): string | undefined {
   return first.startsWith('@') ? `${first}/${second}` : first
 }
 
-/** Find a bare package's directory from the authored patch's module-resolution anchor. */
-function packageDirFromPatch(source: string, packageName: string): string | undefined {
-  for (const searchPath of createRequire(pathToFileURL(source)).resolve.paths(packageName) ?? []) {
+/** Find a bare package's directory from its owning module-resolution anchor. */
+function packageDirFromAnchor(source: string | URL, packageName: string): string | undefined {
+  const anchor = typeof source === 'string' ? pathToFileURL(source) : source
+  for (const searchPath of createRequire(anchor).resolve.paths(packageName) ?? []) {
     const candidate = join(searchPath, packageName)
     if (existsSync(join(candidate, 'package.json'))) return realpathSync(candidate)
   }
@@ -390,7 +398,8 @@ function packageDirFromPatch(source: string, packageName: string): string | unde
  * name and package provenance used by request metadata.
  */
 function linkProfilePackage(source: string, cwd: string, packageName: string): void {
-  const packageDir = packageDirFromPatch(source, packageName)
+  const packageDir = packageDirFromAnchor(source, packageName)
+    ?? (snapshotDependencies.has(packageName) ? packageDirFromAnchor(new URL(import.meta.url), packageName) : undefined)
   // The package may instead belong to the dsh installation; profile boot heals those links.
   if (packageDir === undefined) return
   const link = join(cwd, '.dsh', 'profiles', 'node_modules', packageName)

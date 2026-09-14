@@ -17,17 +17,22 @@ import { guardedPlugin } from './guard.ts'
  * @param group - the `cordis-dynamic` group fiber every host half hangs under.
  * @param plugin - the plugin the sandbox returned; wrapped with the registration guard before starting.
  * @param reportGuardFailure - reports post-activation Host guard rejections to the owning Agent.
+ * @param activation - Optional deployment check and early fiber ownership before awaited startup.
  * @returns the settled child fiber (possibly pending on unsatisfied `inject`).
  */
 export async function startHostHalf(
   group: Fiber,
   plugin: Plugin,
   reportGuardFailure: (error: Error) => void,
+  activation?: { check(): void; mounted(fiber: Fiber): void },
 ): Promise<Fiber> {
   await group.await()
+  activation?.check()
   const fiber = group.ctx.plugin(guardedPlugin(plugin, reportGuardFailure))
+  activation?.mounted(fiber)
   try {
     await fiber.await()
+    activation?.check()
   } catch (error) {
     await fiber.dispose()
     const message = error instanceof Error ? error.message : String(error)

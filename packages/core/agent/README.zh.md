@@ -25,13 +25,15 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-已安装的 `ctx.agentLifecycleSetup` 提供者会将部署负责的准备工作与各调用者的 `AgentSetup` 组合。其 `prepare(agentCtx, agent)` 接收尚未发布的 Agent，并可返回 `AgentSetupCommit`。回滚操作应注册在 Agent 作用域中。驱动器先完成种子事件的持久化，再同步执行调用者和部署的提交，然后在不再等待的情况下发布。提供者负责权限和持久引用，不会替换调用者的预设、工具或模型选择。
+已安装的 `ctx.agentLifecycleSetup` 提供者会将部署负责的准备工作与各调用者的 `AgentSetup` 组合。其 `prepare(agentCtx, agent, capabilities)` 接收尚未发布的 Agent，并可返回 `AgentSetupCommit`。回滚操作应注册在 Agent 作用域中。驱动器先完成种子事件的持久化，再同步执行调用者和部署的提交，然后在不再等待的情况下发布。提供者负责权限和持久引用，不会替换调用者的预设、工具或模型选择。
+
+`prepare(agentCtx, agent, capabilities)` 的第三个参数是冻结的对象：`parent` 是工厂收到的显式父 Agent，不依赖环境中的 initiator 归因；`terminate` 是仅针对该 Agent 的权限终止能力。调用 `terminate()` 会同步停止当前工作，保留排队的 Inbox 输入，并开始原生的持久写入排空、作用域清理和注册表移除。它返回 `void`，因此 pre-step 监听器不会等待自身的清理；异步失败由工厂观察。重复调用共享第一次清理及其 Inbox 策略。旧能力不能终止从同一 Session 恢复的新 Agent。普通 `AgentHandle.dispose()` 若先发起清理，仍保持原有的清空 Inbox 行为。
 
 在存在实时 agent 的任何地方挂载 `dsh-agent`：它提供 `ctx.agents` 以及插件、UI、钩子和编排器所面向编程的 `Agent` 句柄。在没有驱动器注册工厂之前，该服务保持惰性——随附驱动器是 `dsh-agent-loop`，因此最小的可用组合需要同时加载两者。
 
 ### 创建或恢复 agent
 
-`ctx.agents.create()` 在一个身份下构建全新 agent 与会话；`ctx.agents.resume()` 加载持久化会话并在此基础上重建 agent。两者都委托给已注册工厂，并返回 `AgentHandle`——唯一能拆除该 agent 的对象。在任一操作的 options 中设置 `parentAgent`，可使结果成为运行时子级；省略它则得到运行时根级。`get(id)`、`list()` 与 `roots()` 用于查找实时 agent；`isOwnedBy(id, parent)` 用于检验这项确切的实时所有权关系。
+`ctx.agents.create()` 在一个身份下构建全新 agent 与会话；`ctx.agents.resume()` 加载持久化会话并在此基础上重建 agent。两者都委托给已注册工厂，并返回 `AgentHandle`——调用者持有的拆除能力。在任一操作的 options 中设置 `parentAgent`，可使结果成为运行时子级；省略它则得到运行时根级。`get(id)`、`list()` 与 `roots()` 用于查找实时 agent；`isOwnedBy(id, parent)` 用于检验这项确切的实时所有权关系。
 
 ```text
 const handle = await ctx.agents.create({

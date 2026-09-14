@@ -92,6 +92,8 @@ export interface CordisRunOrchestratorEnv {
 
 /** Forwarded approval request fields used by this page. */
 export interface CordisRunRequest {
+  /** False for an exact Host-only code admission. */
+  hasClientHalf?: boolean
   requestId: ApprovalRequestId
   agentId: SessionId
   pluginId: CordisDynamicPluginId
@@ -155,7 +157,7 @@ export class CordisRunOrchestrator {
         packageId: request.packageId,
         mode: request.mode,
         requestId: request.requestId,
-        hasClientHalf: true,
+        hasClientHalf: request.hasClientHalf ?? true,
       }).catch((error: unknown) => {
         console.error(`[cordis-client-runner] automatic activation ${request.requestId} failed:`, error)
       })
@@ -198,6 +200,7 @@ export class CordisRunOrchestrator {
         name: pkg.name,
         purpose: pkg.purpose,
         requiresApproval: attempt.requiresApproval ?? attempt.status === 'awaiting-approval',
+        ...pkg.hasClientHalf ? {} : { hasClientHalf: false },
       })
     }
 
@@ -271,7 +274,7 @@ export class CordisRunOrchestrator {
       mode: request.mode,
       requestId,
       approveFutureVersions,
-      hasClientHalf: true,
+      hasClientHalf: request.hasClientHalf ?? true,
     })
   }
 
@@ -339,7 +342,12 @@ export class CordisRunOrchestrator {
       }
       return
     }
-    if (!plan.hasClientHalf) return
+    if (!plan.hasClientHalf) {
+      if (plan.requestId !== undefined) {
+        await this.answer(plan.requestId, { ok: true, pluginRunId: started.pluginRunId })
+      }
+      return
+    }
 
     let source: DynamicCordisClientSource
     try {
@@ -455,4 +463,5 @@ function sameRequest(left: CordisRunRequest | undefined, right: CordisRunRequest
     && left.name === right.name
     && left.purpose === right.purpose
     && left.requiresApproval === right.requiresApproval
+    && left.hasClientHalf === right.hasClientHalf
 }

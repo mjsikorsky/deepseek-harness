@@ -36,6 +36,8 @@ export const GREP_MAX_LINE_BYTES = 2000
 
 /** Resolved grep-tool caps — plugin config after defaulting (see `Config` in index.ts). */
 export interface GrepToolCaps {
+  /** Optional executable resolved inside the selected subprocess provider. */
+  executable?: string
   /** Max flat matches retained inline; later matches go to the formatted spill file. */
   maxMatches: number
   /** Max bytes retained per matched-line preview. */
@@ -321,7 +323,10 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
     },
     async execute(args, exec) {
       const input = parseGrepArgs(args)
-      const run = await runRipgrep(ctx, exec, 'grep', buildGrepCommand(input), caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes)
+      const run = await runRipgrep(
+        ctx, exec, 'grep', buildGrepCommand(input),
+        caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes, caps.executable,
+      )
       if (run.noMatches) return { matches: [] }
 
       const all: GrepMatch[] = []

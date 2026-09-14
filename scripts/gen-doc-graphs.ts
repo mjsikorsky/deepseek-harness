@@ -99,6 +99,14 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'cordisHostActivationPolicy',
+    pkg: 'cordis-host-runner',
+    title: 'Dynamic Host code activation authority',
+    mode: 'seam',
+    consumers: ['cordis-host-runner'],
+    note: 'Deployment providers admit exact Host source with finite leases and current checks before evaluation and publication.',
+  },
+  {
     key: 'openInAppAccess',
     pkg: 'host-open-in-app',
     title: 'Deployment native application resource authority',
@@ -127,8 +135,8 @@ const SERVICE_ROLES: ServiceRole[] = [
     pkg: 'api-session-controller',
     title: 'Session collection read authorization',
     mode: 'seam',
-    consumers: ['api-session-controller'],
-    note: 'Deployment providers filter native Session identities before list collection and search pagination.',
+    consumers: ['api-session-controller', 'session-log-export'],
+    note: 'Deployment providers filter Session identities before pagination and authorize each exported Session and attachment chunk with captured finite authority.',
   },
   {
     key: 'attachments',

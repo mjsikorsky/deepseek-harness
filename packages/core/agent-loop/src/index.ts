@@ -218,6 +218,8 @@ interface PreparedAgent {
   publish(source: SessionStartSource): AgentHandle
   /** Reverse teardown: stop the machine, unregister, unwind the scope. Memoized. */
   dispose(): Promise<void>
+  /** Preserve queued work while revoking this exact lifecycle, without awaiting its own turn. */
+  terminate: () => void
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -573,50 +575,57 @@ export class AgentLoop extends Service implements AgentFactory {
     // Reverse teardown, memoized so every racing owner awaits one quiescence:
     // stop the machine, drain and close the session's write path, leave the
     // registries, unwind the scope, release bookkeeping.
-    const dispose = (ownerTriggered = false): Promise<void> => (disposing ??= (async () => {
-      abort.abort(new Error(`agent "${id}" lifecycle disposed`))
-      callerSignal?.removeEventListener('abort', onCallerAbort)
-      this.ownership.signal.removeEventListener('abort', onFactoryTeardown)
-      // Teardown failures are collected, never swallowed: registry, scope,
-      // and ownership cleanup always run to quiescence, then the memoized
-      // disposal rejects with what failed so every racing owner observes it.
-      const failures: unknown[] = []
-      try {
-        // Disposal IS a disposed-cause cancel followed by quiescence. New work
-        // sent after this point is the sender's bug — the registries are about
-        // to drop the agent, so nothing should still hold it.
-        /* v8 ignore next -- Cordis effect teardown waits for synchronous setup before observing the machine slot. */
-        if (machine === undefined) await machineReady.promise
-        /* v8 ignore next -- setup failure untracks this disposer before resolving without a machine. */
-        if (machine !== undefined) {
-          machine.cancel({ kind: 'disposed' })
-          await machine.whenIdle()
-          await machine.scope.dispose()
+    const dispose = (ownerTriggered = false, keepInbox = false): Promise<void> => {
+      if (disposing !== undefined) return disposing
+      // Claim the shared teardown before synchronous cancellation listeners can re-enter it.
+      const completion = Promise.withResolvers<void>()
+      disposing = completion.promise
+      void (async () => {
+        abort.abort(new Error(`agent "${id}" lifecycle disposed`))
+        callerSignal?.removeEventListener('abort', onCallerAbort)
+        this.ownership.signal.removeEventListener('abort', onFactoryTeardown)
+        // Teardown failures are collected, never swallowed: registry, scope,
+        // and ownership cleanup always run to quiescence, then the memoized
+        // disposal rejects with what failed so every racing owner observes it.
+        const failures: unknown[] = []
+        try {
+          // Disposal IS a disposed-cause cancel followed by quiescence. New work
+          // sent after this point is the sender's bug — the registries are about
+          // to drop the agent, so nothing should still hold it.
+          /* v8 ignore next -- Cordis effect teardown waits for synchronous setup before observing the machine slot. */
+          if (machine === undefined) await machineReady.promise
+          /* v8 ignore next -- setup failure untracks this disposer before resolving without a machine. */
+          if (machine !== undefined) {
+            machine.cancel({ kind: 'disposed' }, { keepInbox })
+            await machine.whenIdle()
+            await machine.scope.dispose()
+          }
+        } catch (error: unknown) {
+          failures.push(error)
         }
-      } catch (error: unknown) {
-        failures.push(error)
-      }
-      // The loop above committed its closing events synchronously into the
-      // session; handle close drains them durably before releasing the write
-      // path. The close drain can be the first operation that surfaces a
-      // durability failure, so its error is retained, not logged away.
-      try {
-        await handle?.close()
-      } catch (error: unknown) {
-        failures.push(error)
-      }
-      try {
-        detachAgent?.()
-        detachSession?.()
-      } finally {
-        untrack()
-        if (!ownerTriggered) await unfollowOwner()
-      }
-      if (failures.length === 1) throw failures[0]
-      if (failures.length > 1) {
-        throw new AggregateError(failures, `agent "${id}" disposal failed`)
-      }
-    })())
+        // The loop above committed its closing events synchronously into the
+        // session; handle close drains them durably before releasing the write
+        // path. The close drain can be the first operation that surfaces a
+        // durability failure, so its error is retained, not logged away.
+        try {
+          await handle?.close()
+        } catch (error: unknown) {
+          failures.push(error)
+        }
+        try {
+          detachAgent?.()
+          detachSession?.()
+        } finally {
+          untrack()
+          if (!ownerTriggered) await unfollowOwner()
+        }
+        if (failures.length === 1) throw failures[0]
+        if (failures.length > 1) {
+          throw new AggregateError(failures, `agent "${id}" disposal failed`)
+        }
+      })().then(completion.resolve, completion.reject)
+      return disposing
+    }
     const untrack = this.ownership.track(dispose)
     let unfollowOwner: () => Promise<void> | void
     try {
@@ -659,6 +668,12 @@ export class AgentLoop extends Service implements AgentFactory {
       return {
         agent,
         signal: abort.signal,
+        terminate: () => {
+          if (disposing !== undefined) return
+          void dispose(false, true).catch((error: unknown) => {
+            loopCtx.logger.warn(`agent "${id}" authority teardown failed: ${String(error)}`)
+          })
+        },
         publish: (source) => {
           assertLive()
           detachSession = agent.ctx.sessions.enter(session)
@@ -757,6 +772,7 @@ export class AgentLoop extends Service implements AgentFactory {
    * @returns the published handle.
    */
   async createAgent(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
+    const parentAgent = options.parentAgent
     const preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(options.sessionId, {
       ...options.seed === undefined ? {} : { seed: options.seed },
       ...options.meta === undefined ? {} : { meta: options.meta },
@@ -788,7 +804,7 @@ export class AgentLoop extends Service implements AgentFactory {
         options.signal,
         'startup',
         stored,
-        options.parentAgent,
+        parentAgent,
       )
     })()
     this.ownership.trackWrapper(published)
@@ -822,7 +838,9 @@ export class AgentLoop extends Service implements AgentFactory {
       // plugins/subagents. It does not replace the caller's preset or setup.
       const lifecycle = ownerCtx.get('agentLifecycleSetup')
       const lifecycleCommit = await raceAbort(
-        lifecycle?.prepare(prepared.agent.ctx, prepared.agent), prepared.signal, id,
+        lifecycle?.prepare(prepared.agent.ctx, prepared.agent, Object.freeze({
+          terminate: prepared.terminate, parent: parentAgent,
+        })), prepared.signal, id,
       )
       await this.appendUnstoredSuffix(stored, session)
       // No awaited persistence may separate authority validation from publication.
@@ -858,6 +876,7 @@ export class AgentLoop extends Service implements AgentFactory {
     options: ResumeAgentOptions,
   ): Promise<AgentHandle> {
     const id = options.resumeSessionId
+    const parentAgent = options.parentAgent
     const published = (async () => {
       // The open and read may outlive their owner: race them against caller
       // cancellation, owner-fiber unload, and factory teardown so a
@@ -917,7 +936,7 @@ export class AgentLoop extends Service implements AgentFactory {
           options.signal,
           'resume',
           owned,
-          options.parentAgent,
+          parentAgent,
         )
       } finally {
         preparation?.[Symbol.dispose]()

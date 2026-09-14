@@ -1,0 +1,9 @@
+version: 1
+scenario: deployment-termination
+profile: sdk
+composition: sdk-upload
+recording: authored
+environment:
+  DSH_SNAPSHOT_FEEDBACK: '1'
+header:
+  class: sdk-upload

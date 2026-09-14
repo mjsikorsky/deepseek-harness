@@ -27,6 +27,8 @@ English | [中文](README.zh.md)
 
 Every Agent creation path, including direct configured Agents, composes `ctx.agentLifecycleSetup` with caller setup before publication. Preparation runs while the Agent is unpublished; durable seed appends settle before both synchronous commits. A rejected commit prevents registry publication and creation events. Scope disposal unwinds prepared effects; durable writes require reconciliation by their owner and are not a cross-service transaction.
 
+The third `prepare(agentCtx, agent, capabilities)` argument is frozen: `parent` is the explicit factory parent Agent, independent of ambient initiator attribution, and `terminate` is an exact-Agent authority termination capability. Calling `terminate()` synchronously stops current work, retains queued Inbox input, and begins the native persistence drain, scope cleanup and registry removal. It returns `void`, so a pre-step listener cannot await its own teardown; the factory observes asynchronous failures. Repeated calls share the first teardown and its Inbox policy. An old capability cannot terminate a fresh Agent resumed from the same Session. Ordinary `AgentHandle.dispose()` keeps its existing clear-Inbox behavior when it initiates teardown.
+
 Mount `dsh-agent-loop` in any composition that should run agents. It supplies the driver behind `ctx.agents` and starts any agents you declare in its config; both [`dsh-base`](../../bundle/base/README.md) and [`dsh-sdk-minimal`](../../bundle/sdk-minimal/README.md) mount it as an explicit row.
 
 ### Configure declarative agents

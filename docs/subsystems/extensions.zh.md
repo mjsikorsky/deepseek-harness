@@ -4,6 +4,10 @@
 
 extensions 子系统允许 agent（智能体）定义带版本的 Cordis 包、运行其 host 与浏览器两半，并在编写代码前查询获准公开的运行时元数据。包生命周期与沙箱行为由 [`packages/extensions`](../../packages/extensions/README.zh.md) 包组说明。
 
+## Host 代码准入
+
+[Host runner](../../packages/extensions/cordis-host-runner/README.zh.md) 可要求 `ctx.cordisHostActivationPolicy` 在动态 Host 求值前提供部署授权。[`CordisHostActivationRequest`](../../packages/extensions/cordis-host-runner/src/activation-policy.ts) 携带原生会话、插件、包、运行标识及精确源码；provider 从经过验证的上下文中确定审批者权限。[`CordisHostActivationLease`](../../packages/extensions/cordis-host-runner/src/activation-policy.ts) 携带有限到期时间、撤销信号、当前权限检查和一次性释放。原生 owner 保留既有包卡片和 fiber 生命周期；部署 owner 负责真实角色与精确源码授权。
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -11,6 +15,24 @@ extensions 子系统允许 agent（智能体）定义带版本的 Cordis 包、�
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxcordishostactivationpolicy--cordishostactivationpolicy"></a>
+
+### `ctx.cordisHostActivationPolicy` — `CordisHostActivationPolicy`
+
+Deployment provider; a session write permission is not permission to trust Host code.
+
+```ts cordis-catalog
+/**
+ * Authorize exact Host source using current verified approver privileges.
+ * @param request - Native identity and immutable source snapshot.
+ * @param signal - Native stop, undefine and runner-disposal cancellation.
+ * @returns A finite admission, or undefined to deny.
+ */
+authorize(request: Readonly<CordisHostActivationRequest>, signal: AbortSignal): Promise<CordisHostActivationLease | undefined>
+```
+
+Source: [`packages/extensions/cordis-host-runner/src/activation-policy.ts`](../../packages/extensions/cordis-host-runner/src/activation-policy.ts)
 
 <a id="ctxcordisinspect--cordisinspectregistryservice"></a>
 

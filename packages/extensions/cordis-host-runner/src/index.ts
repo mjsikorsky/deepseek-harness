@@ -4,6 +4,9 @@
  * @module @deepseek-ai/dsh-cordis-host-runner
  */
 
+import { admitHostCode, duringHostAdmission } from './activation-policy.ts'
+export type * from './activation-policy.ts'
+
 import { Context } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -88,6 +91,8 @@ declare module '@deepseek-ai/cordis' {
 export interface Config {
   /** Maximum synchronous VM evaluation time in milliseconds. */
   vmTimeoutMs?: number
+  /** Require a deployment policy before any dynamic Host source is evaluated. */
+  requireHostActivationPolicy?: boolean
 }
 
 type ResolvedConfig = Required<Config>
@@ -126,6 +131,7 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
 
   static Config: z<Config> = z.object({
     vmTimeoutMs: z.number().min(1).default(5000),
+    requireHostActivationPolicy: z.boolean().default(false),
   })
 
   private readonly rootCtx: Context
@@ -134,11 +140,14 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
   private readonly starting = new Map<CordisDynamicPluginId, Promise<DynamicCordisHostHalfResult>>()
   private readonly resolved: ResolvedConfig
   private group: Fiber | undefined
+  private readonly activationLifetime = new AbortController()
+  private readonly activationRequests = new Map<CordisDynamicPluginId, AbortController>()
 
   /** Create the service under the Host composition. */
   constructor(ctx: Context, config: Config) {
     super(ctx, 'dynamicCordisRunner')
     this.rootCtx = ctx
+    ctx.effect(() => () => { this.activationLifetime.abort() })
     this.resolved = config as ResolvedConfig
     this.inspectRegistry = new CordisInspectRegistryService(ctx)
   }
@@ -211,6 +220,7 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
     const plugin = this.owned(agent, pluginId)
     if (plugin === undefined) return { ok: false, reason: 'plugin-missing', message: missingPluginMessage(pluginId) }
     const wasRunning = plugin.run !== undefined
+    this.activationRequests.get(pluginId)?.abort()
     this.cancelPending(pluginId, `dynamic plugin "${pluginId}" was removed before approval`)
     if (plugin.run !== undefined) await this.retract(plugin)
     this.registry.delete(pluginId)
@@ -267,7 +277,7 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
     const attempt = this.createAttempt(plan)
     plan.plugin.nextPackageId = packageId
     plan.plugin.latestRun = attempt
-    if (plan.definition.clientCode === undefined) {
+    if (plan.definition.clientCode === undefined && !this.hostAdmissionRequired(plan.definition)) {
       const started = await this.activate(plan, undefined, false, attempt)
       if (started.ok) return this.runResponse(plan.plugin, started)
       this.failAttempt(plan.plugin, attempt, 'host-load', started)
@@ -275,8 +285,8 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
     }
 
     const requestId = ApprovalRequestId(this.registry.mintApprovalRequestId())
-    const requiresApproval = !plan.plugin.clientVersionUpdatesApproved
-      && !plan.plugin.approvedClientPackages.has(packageId)
+    const requiresApproval = this.hostAdmissionRequired(plan.definition)
+      || (!plan.plugin.clientVersionUpdatesApproved && !plan.plugin.approvedClientPackages.has(packageId))
     attempt.approvalRequestId = requestId
     attempt.requiresApproval = requiresApproval
     attempt.status = requiresApproval ? 'awaiting-approval' : 'starting-host'
@@ -289,6 +299,7 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
       requiresApproval,
     })
     this.ctx.emit('cordis/request-run', {
+      ...plan.definition.clientCode === undefined ? { hasClientHalf: false } : {},
       requestId,
       agentId: agent.id,
       pluginId,
@@ -369,7 +380,9 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
       if (attempt.host.status !== 'absent') attempt.host = { status: 'pending', waitingFor: [] }
     }
     const started = await this.activate(plan, requestId ?? undefined, attaching, attempt)
-    if (!started.ok) this.failAttempt(plan.plugin, attempt, 'host-load', started)
+    if (!started.ok && attempt.status !== 'stopped' && attempt.status !== 'cancelled') {
+      this.failAttempt(plan.plugin, attempt, 'host-load', started)
+    }
     return started
   }
 
@@ -457,9 +470,10 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
     const plugin = this.owned(agent, pluginId)
     if (plugin === undefined) return { ok: false, reason: 'plugin-missing', message: missingPluginMessage(pluginId) }
     const pending = this.registry.pendingRequestFor(pluginId)
-    if (plugin.run === undefined && pending === undefined) {
+    if (plugin.run === undefined && pending === undefined && !this.activationRequests.has(pluginId)) {
       return { ok: false, reason: 'not-running', message: `dynamic plugin "${pluginId}" is not running` }
     }
+    this.activationRequests.get(pluginId)?.abort()
     if (pending !== undefined) this.cancelPending(pluginId, `dynamic plugin "${pluginId}" was stopped before approval`)
     if (plugin.run !== undefined) await this.retract(plugin)
     if (plugin.latestRun !== undefined) {
@@ -807,6 +821,11 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
     return { ok: true, plugin, definition, mode }
   }
 
+  private hostAdmissionRequired(definition: DynamicCordisDefinition): boolean {
+    return definition.hostCode !== undefined
+      && (this.resolved.requireHostActivationPolicy || this.ctx.get('cordisHostActivationPolicy') !== undefined)
+  }
+
   private activate(
     plan: ActivationPlan,
     requestId: ApprovalRequestId | undefined,
@@ -815,9 +834,15 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
   ): Promise<DynamicCordisHostHalfResult> {
     const inFlight = this.starting.get(plan.plugin.pluginId)
     if (inFlight !== undefined) return inFlight
-    const starting = this.startFresh(plan, requestId, allowActiveAttach, attempt)
+    const lifetime = new AbortController()
+    this.activationRequests.set(plan.plugin.pluginId, lifetime)
+    const starting = this.startFresh(plan, requestId, allowActiveAttach, attempt,
+      AbortSignal.any([this.activationLifetime.signal, lifetime.signal]))
     this.starting.set(plan.plugin.pluginId, starting)
-    return starting.finally(() => { this.starting.delete(plan.plugin.pluginId) })
+    return starting.finally(() => {
+      this.starting.delete(plan.plugin.pluginId)
+      this.activationRequests.delete(plan.plugin.pluginId)
+    })
   }
 
   private async startFresh(
@@ -825,11 +850,13 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
     requestId: ApprovalRequestId | undefined,
     allowActiveAttach: boolean,
     attempt: DynamicCordisRunAttempt,
+    signal: AbortSignal,
   ): Promise<DynamicCordisHostHalfResult> {
     const { plugin, definition, mode } = plan
     if (allowActiveAttach
       && plugin.run?.packageId === definition.packageId
       && plugin.run.pluginRunId === attempt.pluginRunId) {
+      plugin.run.checkActivation?.()
       return {
         ok: true,
         pluginId: plugin.pluginId,
@@ -839,19 +866,53 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
         startedHere: false,
       }
     }
-    if (plugin.run !== undefined) await this.retract(plugin)
     if (mode === 'update' || plugin.currentPackageId === undefined) plugin.nextPackageId = definition.packageId
     const run: DynamicCordisRun = {
       pluginRunId: attempt.pluginRunId,
       packageId: definition.packageId,
+      activationSignal: signal,
       handlers: new Map(),
       handlerDisposers: [],
       reportedRuntimeErrors: new Set(),
       ...requestId === undefined ? {} : { startedForRequest: requestId },
     }
-    if (definition.hostCode !== undefined) {
-      const failure = await this.startHost(plugin, definition.hostCode, run)
-      if (failure !== undefined) return { ok: false, ...failure }
+    try {
+      signal.throwIfAborted()
+      if (this.hostAdmissionRequired(definition)) {
+        const policy = this.ctx.get('cordisHostActivationPolicy')
+        if (policy === undefined) throw new Error('dynamic Host code requires a deployment activation policy')
+        const hostCode = definition.hostCode
+        if (hostCode === undefined) throw new Error('dynamic Host code is missing from this activation')
+        const admission = await admitHostCode(policy, {
+          sessionId: plugin.sessionId, pluginId: plugin.pluginId,
+          packageId: definition.packageId, pluginRunId: run.pluginRunId,
+          hostCode, name: definition.name, purpose: definition.purpose,
+        }, signal, () => {
+          if (plugin.run === run) void this.retract(plugin)
+          else if (run.fiber !== undefined) void run.fiber.dispose()
+        })
+        run.activationSignal = admission.signal
+        run.checkActivation = () => { admission.check() }
+        run.releaseActivation = () => { admission.release() }
+      }
+      run.checkActivation?.()
+      if (plugin.run !== undefined) await this.retract(plugin)
+      run.checkActivation?.()
+      if (definition.hostCode !== undefined) {
+        const failure = await this.startHost(plugin, definition.hostCode, run)
+        if (failure !== undefined) {
+          const error = new Error(failure.message, { cause: failure })
+          if (failure.stack !== undefined) error.stack = failure.stack
+          throw error
+        }
+      }
+      signal.throwIfAborted()
+      run.checkActivation?.()
+    } catch (error) {
+      for (const dispose of run.handlerDisposers.splice(0)) dispose()
+      if (run.fiber !== undefined) await run.fiber.dispose()
+      run.releaseActivation?.()
+      return { ok: false, ...errorDetails(error) }
     }
     plugin.run = run
     this.ctx.emit('cordis/dynamic-package', {
@@ -896,17 +957,25 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
     }
     try {
       const sandbox = createSandbox(plugin.pluginId, { handle })
-      const evaluated = await evaluateHostCode(sandbox, hostCode, plugin.pluginId, this.resolved.vmTimeoutMs)
+      run.checkActivation?.()
+      const evaluated = await duringHostAdmission(
+        evaluateHostCode(sandbox, hostCode, plugin.pluginId, this.resolved.vmTimeoutMs), run.activationSignal,
+      )
+      run.checkActivation?.()
       if (!isPlugin(evaluated)) {
         throw new Error(evaluated === undefined
           ? 'the Host half returned `undefined` — did you forget `return`?'
           : 'the Host half must return a Plugin function or an object with apply(ctx)')
       }
-      run.fiber = await startHostHalf(
+      run.fiber = await duringHostAdmission(startHostHalf(
         this.requireGroup(),
         evaluated,
         (error) => { this.steerGuardFailure(plugin, run, 'Host', errorDetails(error)) },
-      )
+        run.checkActivation === undefined ? undefined : {
+          check: run.checkActivation,
+          mounted: (fiber) => { run.fiber = fiber },
+        },
+      ), run.activationSignal)
       return undefined
     } catch (error) {
       for (const dispose of run.handlerDisposers.splice(0)) dispose()
@@ -1220,8 +1289,12 @@ export class DynamicCordisRunnerService extends TypertRemoteService {
     const run = plugin.run
     if (run === undefined) return
     delete plugin.run
-    for (const dispose of run.handlerDisposers.splice(0)) dispose()
-    if (run.fiber !== undefined) await run.fiber.dispose()
+    try {
+      for (const dispose of run.handlerDisposers.splice(0)) dispose()
+      if (run.fiber !== undefined) await run.fiber.dispose()
+    } finally {
+      run.releaseActivation?.()
+    }
     this.ctx.emit('cordis/dynamic-retract', {
       pluginId: plugin.pluginId,
       packageId: run.packageId,

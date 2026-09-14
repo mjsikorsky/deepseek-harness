@@ -613,7 +613,18 @@ declare module '@deepseek-ai/cordis' {
 export type SessionProjectionValue = JsonValue
 
 /** Deployment-owned visibility before native list/search pagination. */
+export interface SessionVisibilityReader {
+  /** Fresh resource authorization, bound to the captured finite request lifetime. */
+  canRead(sessionId: SessionId, signal?: AbortSignal): Promise<boolean>
+}
+
+/** Deployment-owned live visibility and finite readers for detached consumers. */
 export interface SessionVisibility {
+  /**
+   * Capture before returning a stream; absence denies detached export consumers.
+   * @returns a reader bound to the current finite request, or undefined without authority.
+   */
+  capture?(): Readonly<SessionVisibilityReader> | undefined
   /**
    * Check the current invocation's authority against this exact native Session.
    * @param sessionId - exact native Session identity.

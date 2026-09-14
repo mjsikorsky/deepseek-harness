@@ -176,6 +176,8 @@ export interface DynamicCordisPackage {
 
 /** One pending model-driven Client activation forwarded to browser pages. */
 export interface DynamicCordisRunRequest {
+  /** False for Host-only approvals; absent preserves the original Client-bearing request. */
+  hasClientHalf?: boolean
   /** Correlation identity of the activation request. */
   requestId: ApprovalRequestId
   /** Session whose plugin and tool call own the request. */

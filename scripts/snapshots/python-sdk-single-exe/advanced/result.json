@@ -1606,6 +1606,30 @@
           "kind": "completed"
         }
       }
+    },
+    {
+      "type": "agent/inbox/spliced",
+      "seq": 72,
+      "time": 0,
+      "data": {
+        "target": "next-turn",
+        "start": 0,
+        "inserted": [
+          {
+            "role": "user",
+            "id": "{{messageId}}",
+            "source": {
+              "kind": "user"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Retain this input for the next authorized execution."
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "notifications": [
@@ -4542,6 +4566,36 @@
             "reason": {
               "kind": "completed"
             }
+          }
+        }
+      }
+    },
+    {
+      "method": "session.event",
+      "payload": {
+        "sessionId": "{{parent}}",
+        "event": {
+          "type": "agent/inbox/spliced",
+          "seq": 72,
+          "time": 0,
+          "data": {
+            "target": "next-turn",
+            "start": 0,
+            "inserted": [
+              {
+                "role": "user",
+                "id": "{{messageId}}",
+                "source": {
+                  "kind": "user"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Retain this input for the next authorized execution."
+                  }
+                ]
+              }
+            ]
           }
         }
       }

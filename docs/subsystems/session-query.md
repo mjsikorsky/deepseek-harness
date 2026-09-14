@@ -6,6 +6,10 @@ Query vocabulary over the live-preferred logical session corpus. The [Service De
 
 Source: [`packages/session-query/session-query/src/types.ts`](../../packages/session-query/session-query/src/types.ts)
 
+## Export visibility
+
+The [Session export package](../../packages/session-query/session-log-export/README.md) consumes the existing SessionController visibility capability through a captured reader. The reader retains finite request authority while ZIP production outlives the initial invocation stack. Lineage is discovery only: each descendant read and each referenced attachment read requires current Session visibility. Provider absence preserves single-owner behavior; a mounted provider without a captured reader denies export.
+
 ## Logical records
 
 `SessionRecord` is returned by the cross-corpus list. It exposes source availability independently from the cloned live-preferred header. `SessionEventRecord` is a lightweight raw-log projection; classification uses the same `foldSurface()` transitions as model-history derivation.

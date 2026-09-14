@@ -7,7 +7,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Group from '@deepseek-ai/cordis-plugin-group'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -25,7 +25,7 @@ afterEach(async () => {
   for (const ctx of contexts.splice(0)) await ctx.fiber.dispose()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
-async function harness() {
+async function harness(adapter = new MockAdapter([])) {
   const root = await mkdtemp(join(tmpdir(), 'native-deployment-lifecycle-'))
   roots.push(root)
   const ctx = new Context()
@@ -61,7 +61,6 @@ async function harness() {
   await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(path).href } })
   await ctx.loader.await()
   expect([...ctx.loader.entries()].filter(entry => entry.fiber === undefined && !entry.disabled)).toEqual([])
-  const adapter = new MockAdapter([])
   ctx.llm.registerAdapter(['mock'], adapter)
   return { ctx, adapter }
 }
@@ -170,4 +169,138 @@ describe('native deployment Agent lifecycle composition', () => {
     expect(ctx.agents.list()).toHaveLength(0)
     expect(adapter.requests).toHaveLength(0)
   })
+
+  it('unregisters an idle revoked Agent, preserves its JSONL inbox, and cannot revoke a fresh incarnation', async () => {
+    const { ctx } = await harness()
+    const terminations: (() => void)[] = []
+    let cleaned = 0
+    ctx.provide('agentLifecycleSetup', { prepare(agentCtx, _agent, { terminate }) {
+      terminations.push(terminate)
+      agentCtx.effect(() => () => { cleaned++ })
+    } })
+    const id = SessionId('authority-idle')
+    const first = await ctx.agents.create({ sessionId: id })
+    const queued = createUserMessage({ content: [{ type: 'text', text: 'retain this input' }], source: { kind: 'user' } })
+    first.agent.inbox.append('next-turn', queued)
+    terminations[0]!()
+    // A concurrent normal dispose joins the already-owned preserve-inbox policy.
+    await first.dispose()
+    expect(ctx.agents.get(id)).toBeUndefined()
+    expect(ctx.sessions.get(id)).toBeUndefined()
+    expect(cleaned).toBe(1)
+    const fresh = await ctx.agents.resume({ resumeSessionId: id })
+    expect(fresh.agent).not.toBe(first.agent)
+    expect(fresh.agent.inbox.nextTurn).toEqual([queued])
+    terminations[0]!()
+    await first.dispose()
+    expect(ctx.agents.get(id)).toBe(fresh.agent)
+    expect(cleaned).toBe(1)
+    await fresh.dispose()
+    expect(cleaned).toBe(2)
+  })
+
+  it('drains a revoked active turn durably without consuming queued work', async () => {
+    const { ctx, adapter } = await harness(new MockAdapter(['hang-slow']))
+    let terminate: (() => void) | undefined
+    ctx.provide('agentLifecycleSetup', { prepare(_ctx, _agent, { terminate: revoke }) { terminate = revoke } })
+    const id = SessionId('authority-active')
+    const handle = await ctx.agents.create({ sessionId: id, agentOptions: { provider: 'mock', model: 'mock' } })
+    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'start' }], source: { kind: 'user' } }))
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+    const queued = createUserMessage({ content: [{ type: 'text', text: 'next authorized turn' }], source: { kind: 'user' } })
+    handle.agent.followup(queued)
+    terminate!()
+    expect(adapter.requests[0]!.signal?.aborted).toBe(true)
+    await handle.dispose()
+    expect(ctx.agents.get(id)).toBeUndefined()
+    expect(ctx.sessions.get(id)).toBeUndefined()
+    const reader = await ctx.sessionPersistence.open(id, 'read')
+    try {
+      const events = (await reader.read()).events
+      const endings = events.filter(event => event.type === 'turn/end')
+      expect(endings).toHaveLength(1)
+      expect(endings[0]?.data.reason).toEqual({ kind: 'aborted', reason: { kind: 'disposed' } })
+    } finally { await reader.close() }
+    const fresh = await ctx.agents.resume({ resumeSessionId: id })
+    expect(fresh.agent.inbox.nextTurn).toEqual([queued])
+    expect(adapter.requests).toHaveLength(1)
+    await fresh.dispose()
+  })
+
+  it('terminates from an awaited pre-step hook without awaiting its own teardown', async () => {
+    const { ctx, adapter } = await harness()
+    let terminated = false
+    ctx.provide('agentLifecycleSetup', { prepare(agentCtx, agent, { terminate }) {
+      agentCtx.on('agent/pre-step', async ({ agent: subject, signal }, next) => {
+        if (subject === agent) {
+          terminate()
+          expect(signal.aborted).toBe(true)
+          await Promise.resolve()
+          terminated = true
+        }
+        return next()
+      })
+    } })
+    const id = SessionId('authority-pre-step')
+    const handle = await ctx.agents.create({ sessionId: id, agentOptions: { provider: 'mock', model: 'mock' } })
+    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'deny before model' }], source: { kind: 'user' } }))
+    await vi.waitFor(() => { expect(terminated).toBe(true) })
+    await handle.dispose()
+    expect(ctx.agents.get(id)).toBeUndefined()
+    expect(ctx.sessions.get(id)).toBeUndefined()
+    expect(adapter.requests).toHaveLength(0)
+  })
+
+
+  it('observes asynchronous authority teardown failure while still removing both registries', async () => {
+    const { ctx } = await harness()
+    let terminate: (() => void) | undefined
+    ctx.provide('agentLifecycleSetup', { prepare(_ctx, _agent, { terminate: revoke }) { terminate = revoke } })
+    const originalCreate = ctx.sessionPersistence.create.bind(ctx.sessionPersistence)
+    vi.spyOn(ctx.sessionPersistence, 'create').mockImplementation(async (header, options) => {
+      const stored = await originalCreate(header, options)
+      const close = stored.close.bind(stored)
+      vi.spyOn(stored, 'close').mockImplementation(async () => {
+        await close()
+        throw new Error('injected close acknowledgement failure')
+      })
+      return stored
+    })
+    const loopFiber = [...ctx.loader.entries()].find(entry => entry.options.name === '@deepseek-ai/dsh-agent-loop')?.fiber
+    expect(loopFiber).toBeDefined()
+    const warning = vi.spyOn(loopFiber!.ctx.logger, 'warn')
+    const id = SessionId('authority-close-failure')
+    const handle = await ctx.agents.create({ sessionId: id })
+    terminate!()
+    terminate!()
+    await expect(handle.dispose()).rejects.toThrow('injected close acknowledgement failure')
+    expect(ctx.agents.get(id)).toBeUndefined()
+    expect(ctx.sessions.get(id)).toBeUndefined()
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('authority teardown failed'))
+    expect(warning).toHaveBeenCalledTimes(1)
+  })
+
+
+  it('supplies the immutable explicit native parent for create and resume, independently of ambient attribution', async () => {
+    const { ctx } = await harness()
+    const parent = await ctx.agents.create({ sessionId: SessionId('structural-parent') })
+    const initiator = await ctx.agents.create({ sessionId: SessionId('ambient-initiator') })
+    const parents: unknown[] = []
+    ctx.provide('agentLifecycleSetup', { prepare(_ctx, _agent, capabilities) {
+      expect(Object.isFrozen(capabilities)).toBe(true)
+      parents.push(capabilities.parent)
+    } })
+    const id = SessionId('structural-child')
+    const child = await ctx.agents.withInitiator(initiator.agent, () =>
+      ctx.agents.create({ sessionId: id, seed, parentAgent: parent.agent }))
+    expect(parents).toEqual([parent.agent])
+    expect(ctx.agents.isOwnedBy(id, parent.agent)).toBe(true)
+    await child.dispose()
+    const resumed = await ctx.agents.withInitiator(initiator.agent, () =>
+      ctx.agents.resume({ resumeSessionId: id, parentAgent: parent.agent }))
+    expect(parents).toEqual([parent.agent, parent.agent])
+    expect(ctx.agents.isOwnedBy(id, parent.agent)).toBe(true)
+    await resumed.dispose();await initiator.dispose();await parent.dispose()
+  })
+
 })

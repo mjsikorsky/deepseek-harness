@@ -10,6 +10,7 @@ import { SESSION_FORMAT_VERSION, SessionSeq } from '@deepseek-ai/dsh-session'
 import { randomBytes } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import type { SessionVisibility } from '@deepseek-ai/dsh-api-session-controller/types'
 import { unzipSync, strFromU8 } from 'fflate'
 import type { FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
@@ -100,6 +101,7 @@ async function buildApi(
   logs: Record<string, StoredLog>,
   descendants: SessionLineageNode[] = [],
   services: {
+    visibility?: SessionVisibility
     query?: boolean
     persistence?: boolean | 'throw'
     attachments?: boolean | ((ref: ImageAttachmentRef, signal?: AbortSignal) => Promise<ReturnType<typeof storedImage>>)
@@ -121,6 +123,7 @@ async function buildApi(
 ) {
   const ctx = new Context()
   ctx.provide('commands', { register: () => () => {} } as never)
+  if (services.visibility) ctx.provide('sessionVisibility', services.visibility)
   const query = services.query ?? true
   const persistence = services.persistence ?? true
   if (query) {
@@ -895,5 +898,43 @@ describe('session.export download endpoint', () => {
     )
     expect(response.status).toBe(500)
     expect(await response.text()).toContain('attachments')
+  })
+})
+
+
+describe('native captured export visibility', () => {
+  it('denies a detached export when its installed visibility owner cannot capture authority', async () => {
+    const open = vi.fn(async () => readHandle(log('session-root')))
+    const api = await buildApi({}, [], { open, visibility: { canRead: async () => true } })
+    const response = await api.fetch.fetch(new Request('http://host/api/session.export?sessionId=session-root'))
+    expect(response.status).toBe(403)
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('does not request another attachment chunk after its referencing Session is revoked', async () => {
+    let allowed = true
+    let requestedSecond = false
+    let finalized = false
+    const visibility: SessionVisibility = {
+      canRead: async () => allowed,
+      capture: () => ({ canRead: async () => allowed }),
+    }
+    const digest = 'd'.repeat(64)
+    const root = log('session-root', undefined, [fileEvent(`sha256:${digest}`, 'private.bin', 2)])
+    const api = await buildApi({ 'session-root': root }, [], { visibility,
+      readFileStream: () => (async function* (): AsyncIterable<Uint8Array> {
+        try {
+          allowed = false
+          yield Uint8Array.of(1)
+          requestedSecond = true
+          yield Uint8Array.of(2)
+        } finally { finalized = true }
+      })(),
+    })
+    const response = await api.fetch.fetch(new Request('http://host/api/session.export?sessionId=session-root'))
+    expect(response.status).toBe(200)
+    await expect(response.arrayBuffer()).rejects.toThrow('Attachment export access ended')
+    expect(requestedSecond).toBe(false)
+    expect(finalized).toBe(true)
   })
 })

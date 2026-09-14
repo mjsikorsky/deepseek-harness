@@ -23,6 +23,7 @@
 
 import { Zip, ZipDeflate } from 'fflate'
 import type { Context } from '@deepseek-ai/cordis'
+import type { SessionVisibilityReader } from '@deepseek-ai/dsh-api-session-controller/types'
 import type {
   AttachmentStore, FileAttachmentRef, ImageAttachmentRef,
 } from '@deepseek-ai/dsh-attachment'
@@ -49,6 +50,8 @@ export interface SessionLogExportDeps {
 
 /** The export services narrowed to the mounted ones streaming actually reads. */
 export interface SessionLogExportReady {
+  /** Request-bound owner captured before asynchronous ZIP production. */
+  readonly visibility?: Readonly<SessionVisibilityReader>
   readonly sessionQuery: SessionQueryEngine
   readonly sessionPersistence: SessionPersistence
   readonly attachments: AttachmentStore
@@ -336,12 +339,27 @@ export async function* sessionLogZipEntries(
 ): AsyncGenerator<SessionLogZipEntry> {
   const media = new Map<string, ImageAttachmentRef>()
   const files = new Map<string, FileAttachmentRef>()
-  const rememberAttachments = (content: string): void => {
-    const refs = attachmentRefsInArtifact(content)
-    for (const [id, ref] of refs.images) media.set(id, ref)
-    for (const [id, ref] of refs.files) files.set(id, ref)
+  const origins = new Map<string, Set<SessionId>>()
+  const check = async (id: SessionId): Promise<void> => {
+    signal?.throwIfAborted()
+    if (deps.visibility && !await deps.visibility.canRead(id, signal)) throw new Error('Session export access ended')
+    signal?.throwIfAborted()
   }
-  rememberAttachments(rootContent)
+  const rememberAttachments = (content: string, owner: SessionId): void => {
+    const refs = attachmentRefsInArtifact(content)
+    for (const [id, ref] of refs.images) {
+      media.set(id, ref)
+      const owners = origins.get('image:' + id) ?? new Set<SessionId>()
+      owners.add(owner); origins.set('image:' + id, owners)
+    }
+    for (const [id, ref] of refs.files) {
+      files.set(id, ref)
+      const owners = origins.get('file:' + id) ?? new Set<SessionId>()
+      owners.add(owner); origins.set('file:' + id, owners)
+    }
+  }
+  await check(sessionId)
+  rememberAttachments(rootContent, sessionId)
   yield { path: SESSION_LOG_FILENAME, content: rootContent }
   if (includeDescendants) {
     const seen = new Set<SessionId>([sessionId])
@@ -353,13 +371,16 @@ export async function* sessionLogZipEntries(
         const id = node.session.header.id
         if (seen.has(id)) continue
         seen.add(id)
+        await check(id)
         await flushLiveSessionLog(deps, id, signal)
+        await check(id)
         const content = await readSessionLogText(deps.sessionPersistence, id, signal)
         signal?.throwIfAborted()
         if (content === undefined) {
           throw new Error(`subagent "${id}" has no stored log`)
         }
-        rememberAttachments(content)
+        await check(id)
+        rememberAttachments(content, id)
         yield {
           path: `subagents/${safeSessionIdSegment(id)}/${SESSION_LOG_FILENAME}`,
           content,
@@ -371,17 +392,40 @@ export async function* sessionLogZipEntries(
     signal?.throwIfAborted()
     yield* collect(lineage.descendants)
   }
-  for (const ref of media.values()) {
+  const checkAttachment = async (key: string): Promise<void> => {
+    signal?.throwIfAborted()
+    if (!deps.visibility) return
+    for (const owner of origins.get(key) ?? []) {
+      if (await deps.visibility.canRead(owner, signal)) { signal?.throwIfAborted(); return }
+    }
+    throw new Error('Attachment export access ended')
+  }
+  for (const [id, ref] of media) {
+    await checkAttachment('image:' + id)
     signal?.throwIfAborted()
     const stored = await deps.attachments.readImage(ref, signal)
     signal?.throwIfAborted()
+    await checkAttachment('image:' + id)
     yield { path: mediaEntryPath(ref), data: stored.data }
   }
-  for (const ref of files.values()) {
+  for (const [id, ref] of files) {
+    await checkAttachment('file:' + id)
+    const guardedChunks = async function* (): AsyncGenerator<Uint8Array> {
+      const iterator = deps.attachments.readFileStream(ref, signal)[Symbol.asyncIterator]()
+      try {
+        while (true) {
+          await checkAttachment('file:' + id)
+          const next = await iterator.next()
+          await checkAttachment('file:' + id)
+          if (next.done) return
+          yield next.value
+        }
+      } finally { await iterator.return?.() }
+    }
     signal?.throwIfAborted()
     yield {
       path: fileEntryPath(ref),
-      chunks: deps.attachments.readFileStream(ref, signal),
+      chunks: guardedChunks(),
     }
   }
 }

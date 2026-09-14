@@ -27,6 +27,8 @@ kind: "package-library"
 
 本包把随附 profile 场景变成无密钥快照套件：写一张场景表和一个 fixture 目录，调用一次匹配的适配器，工具包就负责启动或组合 profile、驱动场景、比较规范化输出并守护已提交的 fixture。
 
+已编写的 profile 补丁首先从 fixture 自己的安装位置解析裸插件包名。当 fixture 位于源码树之外时，启动器可将本测试支持包声明的运行时依赖（包括回放适配器）链接到本次运行的 profile 后备目录。补丁中的裸包名保持不变，指向不同目录的同名包会被拒绝；生产 CLI 的开发依赖不会加入部署的 profile。
+
 ### 编写快照套件
 
 消费方 `*.snapshot.ts` 就是场景表加一次工厂调用。`AgentUnderTest` 提供绝对 `binScript`、可选 `libBinScript`、`configPath` 与 `tsconfigPath` 路径，因为子进程 cwd 位于仓库之外：

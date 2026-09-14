@@ -52,11 +52,12 @@ Routine budgets stay out of the model-facing schema: a model that needs surround
 
 ### Configuration
 
-`sampleOverCapGlobResults` is required; the remaining keys are optional search caps with the defaults below.
+`sampleOverCapGlobResults` is required; other keys select the executable or bound search output and execution.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `sampleOverCapGlobResults` | none (required) | `true` samples an over-cap `glob` page across top-level entries; `false` keeps the modification-time-ordered head |
+| `executable` | packaged binary | Optional ripgrep name or path resolved by `ctx.subprocess.resolveExecutable`; applies to both tools and never falls back to the host binary on failure |
 | `globMaxResults` | `100` | Max paths one `glob` call shows inline |
 | `grepMaxMatches` | `250` | Max flat matches one `grep` call retains inline; later matches go to the formatted spill artifact |
 | `grepMaxLineBytes` | `2000` | Byte cap per matched-line preview, preserving UTF-8 boundaries |
@@ -71,6 +72,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 ### Deployment requirement
 
 Node deployments receive the `@vscode/ripgrep` platform package on supported macOS, Linux, and Windows targets; Python SDK wheels copy the target-native binary beside the single-file runtime as a `-rg` sidecar. No carrier requires a host `rg`. Returned paths are displayed relative to the resolved workdir (the calling session's cwd when present) and are follow-up-readable with `read` only when that workdir and the filesystem root are the same workspace.
+
+For a subprocess provider that runs in a separate container or remote machine, set `executable` to ripgrep in that execution environment. Resolution and launch use the same provider and cancellation signal. The provider must supply ripgrep with the flags used by these tools; the deployment owns that binary version. The tools retain their arguments, result parsing, limits and `--no-config` protection. This option does not grant workspace access or prove that the filesystem and search providers address the same files.
 
 ### Failures and recovery
 
@@ -103,7 +106,7 @@ Local workspace discovery is naturally a process-backed `rg` workflow, and putti
 
 ### How a search runs
 
-Each call resolves the packaged binary (`@vscode/ripgrep`, or the executable's `-rg` sidecar in a pkg single-file runtime), prepends `--no-config` so a host `RIPGREP_CONFIG_PATH` cannot inject a `--pre` preprocessor into the unconfined spawn, and passes every model-controlled value as a plain argv element — no shell layer exists, so no quoting applies. Collect-mode budgets bound complete stdout and a stderr tail; a lossy stdout read fails as `SEARCH_RAW_OUTPUT_OVERFLOW` rather than parsing a silently-partial stream. The tools never read a raw spill path.
+Each call resolves the configured executable through the subprocess provider, or the packaged binary when configuration omits it (`@vscode/ripgrep`, or the executable's `-rg` sidecar in a pkg single-file runtime), prepends `--no-config` so a host `RIPGREP_CONFIG_PATH` cannot inject a `--pre` preprocessor into the unconfined spawn, and passes every model-controlled value as a plain argv element — no shell layer exists, so no quoting applies. Collect-mode budgets bound complete stdout and a stderr tail; a lossy stdout read fails as `SEARCH_RAW_OUTPUT_OVERFLOW` rather than parsing a silently-partial stream. The tools never read a raw spill path.
 
 ### Two budgets, two artifacts
 
@@ -212,7 +215,7 @@ Append-only; newly visible content follows the reusable request prefix and does 
 These limits define when the search tools are a poor fit or need special operational care. They are current package constraints, not a general search comparison or a task backlog.
 
 - **Search and file access have no shared-workspace proof** — returned paths are follow-up-readable only when the workdir and filesystem root denote the same workspace; the package performs no runtime cross-service validation.
-- **The packaged binary is fixed at dependency version** — Node deployments use the version selected by `@vscode/ripgrep`; Python single-file runtimes copy that target-native version into the required `-rg` sidecar. An unsupported platform or a corrupted installation fails with `SEARCH_FAILED`, while the Python runtime package rejects a missing sidecar before launch. Remote or virtual filesystems need a co-located workspace or another search consumer.
+- **The packaged binary is fixed at dependency version** — Node deployments use the version selected by `@vscode/ripgrep`; Python single-file runtimes copy that target-native version into the required `-rg` sidecar. An unsupported platform or a corrupted installation fails with `SEARCH_FAILED`, while the Python runtime package rejects a missing sidecar before launch. A remote subprocess provider can use its own configured executable; the deployment owns that version and workspace alignment.
 - **The schemas expose one bounded page** — offset pagination, case-mode switches, alternate output modes, and provider-backed discovery remain outside this package; capped complete output requires a spill backend.
 - **Sampling, when enabled, groups by first path segment beneath the search root only** — an over-cap `glob` page balances across those top-level entries, so a result concentrated deeper is still shown unevenly below that level; recursive balancing is deferred.
 
@@ -222,7 +225,7 @@ These limits define when the search tools are a poor fit or need special operati
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-None.
+The [subprocess search executable decision](../../../.agents/notes/implemented/architecture/2026-09-13-subprocess-search-executable.md) records why executable selection belongs to this consumer while filesystem access and process ownership remain with their providers.
 
 </details>
 

@@ -1,0 +1,10 @@
+- region "Cordis plugins":
+  - text: Cordis plugins
+  - heading "This session" [level=3]
+  - list:
+    - listitem:
+      - text: human-1 Authorized Host Ready Human-controlled native Host execution
+      - button "Run":
+        - img
+      - button "Remove":
+        - img

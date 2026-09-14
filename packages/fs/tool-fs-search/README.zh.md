@@ -52,11 +52,12 @@ kind: "package-reference"
 
 ### 配置
 
-`sampleOverCapGlobResults` 为必填；其余键是可选的搜索上限，默认值如下。
+`sampleOverCapGlobResults` 为必填；其余键用于选择可执行文件或限制搜索输出与执行。
 
 | 键 | 默认值 | 含义 |
 |---|---|---|
 | `sampleOverCapGlobResults` | 无（必填） | `true` 在顶层条目之间对超过上限的 `glob` 页面采样；`false` 保留按修改时间排序的前部 |
+| `executable` | 打包二进制 | 可选的 ripgrep 名称或路径，由 `ctx.subprocess.resolveExecutable` 解析；同时适用于两个工具，失败时不会回退到宿主二进制 |
 | `globMaxResults` | `100` | 一次 `glob` 调用内联展示的最大路径数 |
 | `grepMaxMatches` | `250` | 一次 `grep` 调用内联保留的最大平铺匹配数；后续匹配写入格式化 spill 产物 |
 | `grepMaxLineBytes` | `2000` | 每条匹配行预览的字节上限，保留 UTF-8 边界 |
@@ -71,6 +72,8 @@ kind: "package-reference"
 ### 部署要求
 
 Node 部署在受支持的 macOS、Linux 与 Windows 目标上获得 `@vscode/ripgrep` 平台包；Python SDK 的 wheel 包把目标原生二进制复制到单文件运行时旁，作为 `-rg` 伴随文件。两种载体均不要求宿主安装 `rg`。返回路径相对于解析后的工作目录显示（有会话 cwd 时使用会话 cwd），只有该工作目录与文件系统根目录是同一工作区时，才能用 `read` 继续读取。
+
+若 subprocess 提供方在独立容器或远程机器中执行，将 `executable` 设为该执行环境中的 ripgrep。解析与启动使用同一提供方和取消信号。提供方必须提供支持这些工具所用参数的 ripgrep；部署方负责该二进制的版本。工具保留原有参数、结果解析、上限和 `--no-config` 保护。此选项不会授予工作区访问权，也不会证明文件系统与搜索提供方指向同一组文件。
 
 ### 失败与恢复
 
@@ -103,7 +106,7 @@ Node 部署在受支持的 macOS、Linux 与 Windows 目标上获得 `@vscode/ri
 
 ### 搜索如何运行
 
-每次调用解析打包二进制（`@vscode/ripgrep`，或 pkg 单文件运行时中可执行程序的 `-rg` 伴随文件），前置 `--no-config`，使宿主的 `RIPGREP_CONFIG_PATH` 无法向不受约束的 spawn 注入 `--pre` 预处理器，并把每个模型控制的值作为普通 argv 元素传入——不存在 shell 层，因此不涉及 shell 引号处理。collect 模式预算限制完整 stdout 与 stderr 尾部；lossy stdout 读取以 `SEARCH_RAW_OUTPUT_OVERFLOW` 失败，而不是解析静默不完整的流。工具从不读取原始 spill 路径。
+每次调用通过子进程提供方解析配置的可执行文件；未配置时解析打包二进制（`@vscode/ripgrep`，或 pkg 单文件运行时中可执行程序的 `-rg` 伴随文件），前置 `--no-config`，使宿主的 `RIPGREP_CONFIG_PATH` 无法向不受约束的 spawn 注入 `--pre` 预处理器，并把每个模型控制的值作为普通 argv 元素传入——不存在 shell 层，因此不涉及 shell 引号处理。collect 模式预算限制完整 stdout 与 stderr 尾部；lossy stdout 读取以 `SEARCH_RAW_OUTPUT_OVERFLOW` 失败，而不是解析静默不完整的流。工具从不读取原始 spill 路径。
 
 ### 两类预算、两类产物
 
@@ -212,7 +215,7 @@ glob 描述声明了配置的超过上限排序方式。生成的 [`glob` 和 `g
 这些限制说明搜索工具何时不合适，或何时需要特别的运维注意。它们是当前包约束，不是通用搜索对比或任务积压。
 
 - **搜索与文件访问没有共享工作区证明**——只有当工作目录与文件系统根目录指向同一工作区时，返回路径才可继续读取；本包不执行运行时跨服务校验。
-- **打包二进制固定在依赖版本上**——Node 部署使用 `@vscode/ripgrep` 选择的版本；Python 单文件运行时将对应目标的原生版本复制为必需的 `-rg` 伴随文件。不支持的平台或损坏的安装会以 `SEARCH_FAILED` 使调用失败，Python 运行时包则会在启动前拒绝缺少伴随文件的安装。远程或虚拟文件系统需要共置的工作区或另一个搜索消费方。
+- **打包二进制固定在依赖版本上**——Node 部署使用 `@vscode/ripgrep` 选择的版本；Python 单文件运行时将对应目标的原生版本复制为必需的 `-rg` 伴随文件。不支持的平台或损坏的安装会以 `SEARCH_FAILED` 使调用失败，Python 运行时包则会在启动前拒绝缺少伴随文件的安装。远程 subprocess 提供方可以使用其配置的可执行文件；部署方负责该版本及工作区对齐。
 - **schema 只暴露一个有界页面**——偏移分页、大小写开关、替代输出模式与提供方支撑的发现仍不在本包范围内；达到上限的完整输出需要 spill 后端。
 - **启用采样时仅按搜索根正下方的第一段路径分组**——超过上限的 `glob` 页面在这些顶层条目之间平衡，因此集中在更深处的结果在该层级之下仍会呈现不均；递归平衡被延期。
 
@@ -222,7 +225,7 @@ glob 描述声明了配置的超过上限排序方式。生成的 [`glob` 和 `g
 <details>
 <summary>维护者的工作上下文——点击展开</summary>
 
-无。
+关于为何由此消费方选择可执行文件、而文件系统访问与进程所有权仍由各自提供方管理，见[子进程搜索可执行文件决策](../../../.agents/notes/implemented/architecture/2026-09-13-subprocess-search-executable.zh.md)。
 
 </details>
 

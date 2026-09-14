@@ -27,6 +27,8 @@ English | [中文](README.zh.md)
 
 This package turns a shipped profile scenario into a keyless snapshot suite: write a scenario table and a fixtures directory, call the matching adapter once, and the kit owns launching or composing the profile, driving the scenario, comparing normalized output, and guarding the committed fixtures.
 
+Authored profile patches resolve bare plugin packages from the fixture's own installation first. When a fixture lives outside the source tree, the launcher may link a declared runtime dependency of this test-support package, including the replay adapter, into that run's profile fallback. Bare package names remain unchanged in the patch, and conflicting package directories are rejected; production CLI development dependencies are not added to the deployed profile.
+
 ### Writing a snapshot suite
 
 A consuming `*.snapshot.ts` is the scenario table plus one factory call. `AgentUnderTest` supplies absolute `binScript`, optional `libBinScript`, `configPath`, and `tsconfigPath` paths, because the subprocess cwd sits outside the repository:

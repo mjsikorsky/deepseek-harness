@@ -15,6 +15,12 @@ export type DynamicCordisHandler = (args: unknown) => Promise<unknown>
 
 /** One live activation and everything its teardown owns. */
 export interface DynamicCordisRun {
+  /** Deployment activation authority retained until retraction. */
+  checkActivation?: () => void
+  /** Cancels pending native activation waits when trust ends. */
+  activationSignal?: AbortSignal
+  /** Release the exact Host code admission once. */
+  releaseActivation?: () => void
   /** Exact activation identity. */
   pluginRunId: CordisDynamicPluginRunId
   /** Immutable package version being run. */

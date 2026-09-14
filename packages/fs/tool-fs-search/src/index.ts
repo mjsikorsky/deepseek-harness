@@ -71,6 +71,8 @@ export const inject = ['tools', 'systemPrompt', 'subprocess']
 
 /** Plugin config; over-cap glob sampling is an explicit deployment choice and the remaining fields have defaults. */
 export interface Config {
+  /** Optional ripgrep name/path resolved by the selected subprocess execution world. Omission uses the packaged host binary. */
+  executable?: string
   /** Whether an over-cap `glob` page is sampled across top-level entries instead of taking the modification-time head. */
   sampleOverCapGlobResults: boolean
   /** Max paths one `glob` call retains inline; later paths go to the formatted spill file. */
@@ -95,6 +97,7 @@ export interface Config {
 }
 
 export const Config: z<Config> = z.object({
+  executable: z.string(),
   sampleOverCapGlobResults: z.boolean().required(),
   globMaxResults: z.number().default(GLOB_MAX_RESULTS),
   grepMaxMatches: z.number().default(GREP_MAX_MATCHES),
@@ -107,7 +110,7 @@ export const Config: z<Config> = z.object({
 })
 
 /** The shape after schemastery applied the defaults. */
-type ResolvedConfig = Required<Config>
+type ResolvedConfig = Required<Omit<Config, 'executable'>> & Pick<Config, 'executable'>
 
 /** Every search cap counts items/bytes/milliseconds — a positive integer, or retention and timeout arithmetic misbehaves silently. */
 function assertPositiveInteger(name: string, value: number): void {
@@ -128,6 +131,9 @@ function assertPositiveInteger(name: string, value: number): void {
 export async function apply(ctx: Context, config: Config): Promise<void> {
   // schemastery (Config) has already filled every defaulted field.
   const resolved = config as ResolvedConfig
+  if (resolved.executable !== undefined && resolved.executable.trim().length === 0) {
+    throw new Error('tool-fs-search: executable must be non-empty')
+  }
   assertPositiveInteger('globMaxResults', resolved.globMaxResults)
   assertPositiveInteger('grepMaxMatches', resolved.grepMaxMatches)
   assertPositiveInteger('grepMaxLineBytes', resolved.grepMaxLineBytes)
@@ -147,6 +153,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     graceMs: resolved.graceMs,
     stderrMaxBytes: resolved.stderrMaxBytes,
     timeoutMs: resolved.timeoutMs,
+    ...(resolved.executable === undefined ? {} : { executable: resolved.executable }),
   })
   applyGrepTool(ctx, {
     maxMatches: resolved.grepMaxMatches,
@@ -156,5 +163,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     graceMs: resolved.graceMs,
     stderrMaxBytes: resolved.stderrMaxBytes,
     timeoutMs: resolved.timeoutMs,
+    ...(resolved.executable === undefined ? {} : { executable: resolved.executable }),
   })
 }

@@ -6,6 +6,8 @@
 
 已安装的 `ctx.agentLifecycleSetup` 提供者会将 `AgentLifecycleSetup.prepare()` 与调用者的 `AgentSetup` 组合，保留预设和作用域工具。AgentLoop 等待持久种子追加后同步执行调用者和部署的提交，随后不再等待便发布。提供者拒绝时，不会发出创建事件或在注册表中可见；持久准备的协调仍由其所有者负责。
 
+`prepare(agentCtx, agent, capabilities)` 的第三个参数是冻结的对象：`parent` 是工厂收到的显式父 Agent，不依赖环境中的 initiator 归因；`terminate` 是仅针对该 Agent 的权限终止能力。调用 `terminate()` 会同步停止当前工作，保留排队的 Inbox 输入，并开始原生的持久写入排空、作用域清理和注册表移除。它返回 `void`，因此 pre-step 监听器不会等待自身的清理；异步失败由工厂观察。重复调用共享第一次清理及其 Inbox 策略。旧能力不能终止从同一 Session 恢复的新 Agent。普通 `AgentHandle.dispose()` 若先发起清理，仍保持原有的清空 Inbox 行为。
+
 ## 主干逐包速览
 
 一个轮次按同一条循环流经六个包：[`agent-loop`](../../packages/core/agent-loop) 中的 driver 认领一条排队的提示词，在[会话日志](session.zh.md)（`ctx.sessions`）上开启轮次，通过 [system-prompt](system-prompt.zh.md)（`ctx.systemPrompt`）组装请求前缀并从日志派生历史，经 [LLM（大语言模型） seam](llm-streaming.zh.md) 流式获取模型响应，经[工具注册表](tools.zh.md)（`ctx.tools`）分发工具调用，并把每个模型可见的事实追加回日志，供下一步派生。循环搬运的对话词汇——`Message`、`ContentBlock`、`StreamChunk`、模型请求——由 [`packages/llm`](../../packages/llm/README.zh.md) 声明，记录在 [llm-streaming.md](llm-streaming.zh.md)。
@@ -33,7 +35,9 @@
 /**
  * An owned agent plus its disposer, returned by {@link AgentRegistry.create} /
  * {@link AgentRegistry.resume}. The disposer is a CAPABILITY: among consumers,
- * only the holder can tear this agent down. The registered factory provider is
+ * the holder can tear this agent down. A deployment lifecycle provider receives
+ * a separate exact-agent termination capability that preserves queued input.
+ * The registered factory provider is
  * also a structural owner because the scoped agent depends on that provider's
  * service API; provider unload stops and drains every live handle it made.
  * `dispose()` stops the loop, awaits its exit, unregisters the agent, removes
@@ -466,9 +470,16 @@ Deployment-owned setup composed with every caller's existing Agent setup.
  * A returned commit executes after persistence settles, immediately before publication.
  * @param agentCtx - unpublished Agent scope owning prepared effects.
  * @param agent - unpublished Agent being composed.
+ * @param capabilities - immutable factory-owned parent reference and exact lifecycle termination.
+ * The parent is the explicit creation/resume parent, never ambient initiator attribution.
+ * Termination revokes authority. Stops the Agent
+ * synchronously, preserves queued inbox messages, then drains persistence and removes
+ * both live registry entries. Returns void so a pre-step listener cannot await its own
+ * completion; the factory observes asynchronous teardown failures. Repeated calls are
+ * inert, including after the same Session is resumed as a different Agent.
  * @returns optional publication commit, after preparation finishes.
  */
-prepare(agentCtx: Context, agent: Agent): ReturnType<AgentSetup>
+prepare( agentCtx: Context, agent: Agent, capabilities: Readonly<{ terminate: () => void; parent: Agent | undefined }>, ): ReturnType<AgentSetup>
 ```
 
 Source: [`packages/core/agent/src/index.ts`](../../packages/core/agent/src/index.ts)

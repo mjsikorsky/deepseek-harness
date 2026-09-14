@@ -7,6 +7,8 @@ A service can be a core spine service, a swappable capability seam, or a bundle/
 
 ```mermaid
 flowchart LR
+  pkg_cordis_host_runner["cordis-host-runner"]
+  svc_cordisHostActivationPolicy["ctx.cordisHostActivationPolicy<br/>Dynamic Host code activation authority"]
   pkg_host_open_in_app["host-open-in-app"]
   svc_openInAppAccess["ctx.openInAppAccess<br/>Deployment native application resource authority"]
   pkg_agent["agent"]
@@ -16,6 +18,7 @@ flowchart LR
   svc_gatewayAccess["ctx.gatewayAccess<br/>Deployment Remote carrier admission"]
   pkg_api_session_controller["api-session-controller"]
   svc_sessionVisibility["ctx.sessionVisibility<br/>Session collection read authorization"]
+  pkg_session_log_export["session-log-export"]
   pkg_attachment["attachment"]
   svc_attachments["ctx.attachments<br/>Durable binary attachment storage"]
   pkg_attachment_local["attachment-local"]
@@ -226,7 +229,6 @@ flowchart LR
   pkg_lsp["lsp"]
   svc_lsp["ctx.lsp<br/>Language-server navigation seam"]
   pkg_tool_lsp["tool-lsp"]
-  pkg_cordis_host_runner["cordis-host-runner"]
   svc_dynamicCordisRunner["ctx.dynamicCordisRunner<br/>Dynamic Cordis package host runner"]
   svc_cordisInspect["ctx.cordisInspect<br/>Dynamic Cordis inspect registry"]
   pkg_agent --> svc_agentLifecycleSetup
@@ -259,6 +261,7 @@ flowchart LR
   pkg_compaction --> svc_compaction
   pkg_compaction_basic --> svc_compaction
   pkg_compaction_tool_result_pruner --> svc_toolResultPruner
+  pkg_cordis_host_runner --> svc_cordisHostActivationPolicy
   pkg_cordis_host_runner --> svc_cordisInspect
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
   pkg_credentials --> svc_credentials
@@ -373,6 +376,7 @@ flowchart LR
   svc_clientModules --> pkg_client_hmr
   svc_codeRuntime --> pkg_tools
   svc_compaction --> pkg_compaction_basic
+  svc_cordisHostActivationPolicy --> pkg_cordis_host_runner
   svc_cordisInspect --> pkg_tool_cordis
   svc_credentials --> pkg_api_settings_controller
   svc_credentials --> pkg_llm_deepseek
@@ -420,6 +424,7 @@ flowchart LR
   svc_sessionQuery --> pkg_session_reference
   svc_sessionQuery --> pkg_tool_session_query
   svc_sessionVisibility --> pkg_api_session_controller
+  svc_sessionVisibility --> pkg_session_log_export
   svc_sessions --> pkg_agent
   svc_sessions --> pkg_agent_loop
   svc_sessions --> pkg_invariants
@@ -487,10 +492,11 @@ flowchart LR
 
 | ctx key | Role | Owner | Implementations | Direct consumers | Companion plugins | Note |
 | --- | --- | --- | --- | --- | --- | --- |
+| `ctx.cordisHostActivationPolicy` | `seam` | [`cordis-host-runner`](../packages/extensions/cordis-host-runner) | - | [`cordis-host-runner`](../packages/extensions/cordis-host-runner) | - | Deployment providers admit exact Host source with finite leases and current checks before evaluation and publication. |
 | `ctx.openInAppAccess` | `seam` | [`host-open-in-app`](../packages/host/open-in-app) | - | [`host-open-in-app`](../packages/host/open-in-app) | - | Deployment providers grant installed-app observations and one canonical launch directory with current authority checks before every launcher attempt. |
 | `ctx.agentLifecycleSetup` | `seam` | [`agent`](../packages/core/agent) | - | [`agent-loop`](../packages/core/agent-loop) | - | Deployment providers prepare an unpublished Agent alongside caller setup and commit after durable appends, immediately before native publication. |
 | `ctx.gatewayAccess` | `seam` | [`api-gateway`](../packages/api/gateway) | - | [`api-gateway`](../packages/api/gateway) | - | Deployment providers admit finite carrier leases and authorize native dispatch and delivery without replacing RPC or mux framing. |
-| `ctx.sessionVisibility` | `seam` | [`api-session-controller`](../packages/api/session-controller) | - | [`api-session-controller`](../packages/api/session-controller) | - | Deployment providers filter native Session identities before list collection and search pagination. |
+| `ctx.sessionVisibility` | `seam` | [`api-session-controller`](../packages/api/session-controller) | - | [`api-session-controller`](../packages/api/session-controller), [`session-log-export`](../packages/session-query/session-log-export) | - | Deployment providers filter Session identities before pagination and authorize each exported Session and attachment chunk with captured finite authority. |
 | `ctx.attachments` | `seam` | [`attachment`](../packages/attachment/attachment) | [`attachment-local`](../packages/attachment/attachment-local) | [`api-session-controller`](../packages/api/session-controller), [`tool-fs`](../packages/fs/tool-fs), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-deepseek`](../packages/llm/llm-deepseek) | - | The host commits accepted images before session events; provider adapters resolve authorized durable references into provider-native content. |
 | `ctx.fileUploads` | `core` | [`client-file-upload`](../packages/client/file-upload) | - | [`api-session-controller`](../packages/api/session-controller) | - | Owns streaming intake, durable storage, and staged receipt lifetime; the Session controller binds receipts to accepted submissions. |
 | `ctx.llm` | `seam` | [`llm`](../packages/llm/llm) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-replay`](../packages/test-support/llm-replay) | [`agent-loop`](../packages/core/agent-loop), [`compaction-basic`](../packages/compaction/compaction-basic) | - | Adapters register provider implementations; the loop and compaction call the provider-neutral stream service. |

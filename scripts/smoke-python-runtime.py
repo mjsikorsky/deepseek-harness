@@ -1302,6 +1302,10 @@ def smoke_sdk_snapshot(base_url: str, executable: Path, update_snapshots: bool) 
             {"id": "snapshot-feedback-producer", "name": (
                 Path(__file__).resolve().parent.parent / "snapshots/sdk/text-turn/feedback-producer.mjs"
             ).as_uri()},
+            {"id": "snapshot-deployment-termination", "name": (
+                Path(__file__).resolve().parent.parent /
+                "packages/test-support/session-snapshot/tests/fixtures/deployment-termination.mjs"
+            ).as_uri(), "config": {"receiptPath": str(dsh_home / "lifecycle-receipt.json")}},
         ]}])
         with DeepSeekHarness(
             provider="deepseek-official",
@@ -1319,6 +1323,17 @@ def smoke_sdk_snapshot(base_url: str, executable: Path, update_snapshots: bool) 
             request_timeout_seconds=60,
         ) as harness:
             result = harness.run(SNAPSHOT_PROMPT, session_id=SNAPSHOT_SESSION_ID)
+            receipt_path = dsh_home / "lifecycle-receipt.json"
+            deadline = time.monotonic() + 10
+            while not receipt_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            receipt = json.loads(receipt_path.read_text())
+            expected_receipt = {
+                "sameSession": True, "freshAgent": True, "queuedPreserved": True,
+                "staleRevocationRejected": True, "drained": True,
+            }
+            if receipt != expected_receipt:
+                raise AssertionError(f"native deployment lifecycle did not preserve its Session: {receipt}")
 
         assert result.final_response == SNAPSHOT_FINAL_TEXT, result.final_response
         feedback_types = [event.get("type") for event in result.events

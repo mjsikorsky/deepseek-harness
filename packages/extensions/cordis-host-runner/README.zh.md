@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-cordis-host-runner` 让动态包在本进程中可运行：模型用 `cordis_define` 记录的定义留在这里，host 半在 `node:vm` 沙箱中运行，带浏览器半的包会等待人在页面上批准或拒绝，模型也可以在这里检查实时运行时及其定义。面向模型的工具在 `@deepseek-ai/dsh-tool-cordis` 中，浏览器半经 `@deepseek-ai/dsh-cordis-client-runner` 装载。定义只存在于进程内存中，因此 DSH 重启即清空，也不会向磁盘写任何东西。唯一的配置字段 `vmTimeoutMs` 限制同步沙箱求值的时长。
+`dsh-cordis-host-runner` 让 agent（智能体）定义并在本进程中运行动态 Cordis 包。不可变版本支持更新，带浏览器半的包使用 Cordis 审批卡片。共享部署可以通过同一卡片要求精确的 Host 代码准入。定义只存在于进程内存中，重启即消失。模型工具属于 `@deepseek-ai/dsh-tool-cordis`，浏览器执行属于 `@deepseek-ai/dsh-cordis-client-runner`。`vmTimeoutMs` 限制同步求值时长，部署策略决定是否信任 Host 代码。
 
 ## 目录
 
@@ -38,12 +38,21 @@ kind: "package-reference"
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `vmTimeoutMs` | `5000` | host 半在 vm 中同步执行的那部分被中止求值前可运行的毫秒数 |
+| `requireHostActivationPolicy` | `false` | 动态 Host 源码求值前必须获得部署准入 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-cordis-host-runner)是每个受支持字段的穷尽式真源。
 
 ### run 会做什么
 
-定义由 `cordis_define` 记录、由 `cordis_run` 激活。只有 host 半的包直接在本进程中激活：它的代码在沙箱中运行。带浏览器半的包变成一次请求：它一直等到有人在一个页面上允许或拒绝，或提问的轮次被取消；作答页面随后先装载 host 半、再装载浏览器半。`mode: "run"` 启动当前包或重启它，`mode: "update"` 切换到另一个包版本。`cordis_stop` 结束一次存活运行——移除该包的 handler 与任何已装载的浏览器 UI——同时保留可再次运行的定义；`cordis_undefine` 停止并忘掉它。
+定义由 `cordis_define` 记录、由 `cordis_run` 激活。未配置部署准入策略时，只有 host 半的包直接在本进程中激活：它的代码在沙箱中运行。带浏览器半的包变成一次请求：它一直等到有人在一个页面上允许或拒绝；作答页面随后先装载 host 半、再装载浏览器半。`mode: "run"` 启动当前包或重启它，`mode: "update"` 切换到另一个包版本。`cordis_stop` 结束一次存活运行——移除该包的 handler 与任何已装载的浏览器 UI——同时保留可再次运行的定义；`cordis_undefine` 停止并忘掉它。
+
+### 共享部署的 Host 准入
+
+将 `requireHostActivationPolicy` 设为 `true` 并组合 `cordisHostActivationPolicy`，即可要求对精确的 Host 源码授权。纯 Host 包也使用现有的 Cordis 审批卡片。直接从面板激活遵循同一策略。缺少或被拒绝的授权会阻止求值；更新未来 Client 版本的权限不会批准新的 Host 代码。
+
+provider 从经过身份验证的部署上下文中确定审批者及其代码信任权限。会话所有权或协作者写权限不授予该权限。有限租约在求值前和等待启动后检查。到期、撤销、停止和 undefine 会撤回待完成激活并释放原生 fiber 与 handler；迟到的批准不能重新激活已停止的包。
+
+决策依据见 [Host 代码准入 Agent Note](../../../.agents/notes/implemented/architecture/2026-09-13-dynamic-host-code-admission.zh.md)。
 
 ### 定义的去向
 
@@ -51,7 +60,7 @@ kind: "package-reference"
 
 ### 信任立场
 
-沙箱隔离全局变量，但不是安全边界：Node 全局变量不存在，或重定向到 Cordis 服务（`ctx.fs`、`ctx.web`、`ctx.bash` 与定时器 helper），host 半收到的是不含框架内部机制的 façade，但它声明的服务仍会触达存活运行时。对待动态包要像对待 bash 访问一样，参见[自引用工具集 Agent Note](../../../.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.zh.md)。
+沙箱隔离全局变量，但不是安全边界：Node 全局变量不存在，或重定向到 Cordis 服务（`ctx.fs`、`ctx.web`、`ctx.bash` 与定时器 helper），host 半收到的是不含框架内部机制的 façade，但它声明的服务仍会触达存活运行时。获得准入的 Host 代码可以访问此共享进程及其私有资源。撤回不能撤销先前的副作用，也不能收回受信任代码刻意保留的引用。Host 代码信任与在隔离执行 guest 中运行代码的权限相互独立，参见[自引用工具集 Agent Note](../../../.agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.zh.md)。
 
 -----
 
@@ -65,7 +74,7 @@ kind: "package-reference"
 
 ### 设计理念
 
-runner 基于两项职责划分。**注册表与沙箱是同一个服务。** `DynamicCordisRunnerService` 拥有定义注册表、vm 沙箱、host 半 fiber 生命周期与 invoke handler 表，因此一个定义的整个生命周期只有一个 owner。**版本是不可变的包。** 插件持有 `define` 之后永不变化的包；`currentPackageId` 与 `nextPackageId` 指向运行中与目标版本，`mode: "run"` 与 `"update"` 编码目标是否等于当前版本。浏览器往返之所以存在，是因为浏览器半只能由页面执行：服务 emit 请求并挂起，由页面的结论结算，调用方的 `AbortSignal` 是唯一的另一条出路。
+runner 基于两项职责划分。**注册表与沙箱是同一个服务。** `DynamicCordisRunnerService` 拥有定义注册表、vm 沙箱、host 半 fiber 生命周期与 invoke handler 表，因此一个定义的整个生命周期只有一个 owner。**版本是不可变的包。** 插件持有 `define` 之后永不变化的包；`currentPackageId` 与 `nextPackageId` 指向运行中与目标版本，`mode: "run"` 与 `"update"` 编码目标是否等于当前版本。浏览器往返之所以存在，是因为浏览器半只能由页面执行：服务 emit 请求并挂起，由页面的结论结算，停止、undefine 和部署授权共同控制取消。
 
 ### 源码地图
 
@@ -81,7 +90,7 @@ runner 基于两项职责划分。**注册表与沙箱是同一个服务。** `D
 
 ### 一次 run 的流程
 
-`define` 对元数据做首尾去空白与必填校验，用编译预检每一半的语法（不执行任何代码），铸出插件与包标识，并把定义登记在发起调用的会话名下。`run` 对照 `currentPackageId` 与 `nextPackageId` 解析目标：纯 host 包在沙箱中求值并立即提交，带浏览器半的包则建立一次审批请求、emit `cordis/request-run` 并挂起。作答页面依次走 `runHostHalf`、`getClientCode` 与 `resolveRequestRun`；命名存活 revision 的成功会提交激活、设置 `currentPackageId`，`cordis/request-run-resolved` 让其他每个页面撤下待作答入口。`stop` 回退存活下发——handler disposer、fiber dispose（资源释放）与 `cordis/dynamic-retract` 广播——并让定义保持可运行。四条转发事件（`cordis/request-run`、`cordis/request-run-resolved`、`cordis/dynamic-package`、`cordis/dynamic-retract`）声明在 client 安全的 `./types` 子路径上，并由 `@deepseek-ai/dsh-api-remotes` 的白名单准许投递——正是这一点让浏览器能经 `ctx.remote.$on` 收到它们。
+`define` 对元数据做首尾去空白与必填校验，用编译预检每一半的语法（不执行任何代码），铸出插件与包标识，并把定义登记在发起调用的会话名下。`run` 对照 `currentPackageId` 与 `nextPackageId` 解析目标：未配置部署准入的纯 host 包在沙箱中求值并立即提交，需要页面决策的包则建立一次审批请求、emit `cordis/request-run` 并挂起。作答页面先调用 `runHostHalf`，仅在存在 Client 半时获取其代码，然后调用 `resolveRequestRun`；命名存活 revision 的成功会提交激活、设置 `currentPackageId`，`cordis/request-run-resolved` 让其他每个页面撤下待作答入口。`stop` 回退存活下发——handler disposer、fiber dispose（资源释放）与 `cordis/dynamic-retract` 广播——并让定义保持可运行。四条转发事件（`cordis/request-run`、`cordis/request-run-resolved`、`cordis/dynamic-package`、`cordis/dynamic-retract`）声明在 client 安全的 `./types` 子路径上，并由 `@deepseek-ai/dsh-api-remotes` 的白名单准许投递——正是这一点让浏览器能经 `ctx.remote.$on` 收到它们。
 
 </details>
 
@@ -126,7 +135,7 @@ runner 基于两项职责划分。**注册表与沙箱是同一个服务。** `D
 这些限制说明 runner 何时需要特别小心。它们是当前包约束，不是任务积压。
 
 - **run 成功不等于 UI 渲染成功**——只要作答页面已装载浏览器半，`run` 就会返回；React 是随后才渲染的，因此抛异常的组件不可能出现在 run 回执里。该失败经 steering 与 `cordis_inspect_self` 诊断浮现。
-- **带浏览器半的包在没有页面连接的地方挂起**——headless 与 ACP（Agent Client Protocol）部署会把 run 一直挂到提问的轮次被取消；纯 host 包不受影响。
+- **页面审批需要已连接的页面**——请求保持待处理，直到得到应答、停止或移除。部署准入要求运行卡片时，纯 Host 包也遵循此规则。
 - **挂起的 run 请求没有超时**——它一直等人，直到提问的轮次被取消，因此无人值守的自动化用不了带浏览器半的包。
 - **`vmTimeoutMs` 只约束同步求值**——async 的 host 半函数体会逃出该上限，这与工具集基于协作的信任立场一致。
 - **陈旧成功的拒绝会让请求继续挂起**——作答页面点名的 revision 已被注册表越过时，该结论会被拒绝（`accepted: false`），请求保持可作答，直到另一个页面作答或调用方取消；浏览器半不读这个 ack。

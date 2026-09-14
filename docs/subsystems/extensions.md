@@ -4,6 +4,10 @@ English | [中文](extensions.zh.md)
 
 The extensions subsystem lets an agent define versioned Cordis packages, run their host and browser halves, and query approved runtime metadata before writing code. Package lifecycle and sandbox behavior belong to the [`packages/extensions`](../../packages/extensions/README.md) package group.
 
+## Host code admission
+
+The [Host runner](../../packages/extensions/cordis-host-runner/README.md) can require `ctx.cordisHostActivationPolicy` for deployment authorization before dynamic Host evaluation. [`CordisHostActivationRequest`](../../packages/extensions/cordis-host-runner/src/activation-policy.ts) carries native session, plugin, package and run identities with exact source; the provider derives approver privileges from verified context. [`CordisHostActivationLease`](../../packages/extensions/cordis-host-runner/src/activation-policy.ts) carries finite expiry, revocation, current-authority checks and one-shot release. The native owner retains the existing package card and fiber lifecycle; the deployment owner supplies real role and exact-source authorization.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -11,6 +15,24 @@ The extensions subsystem lets an agent define versioned Cordis packages, run the
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxcordishostactivationpolicy--cordishostactivationpolicy"></a>
+
+### `ctx.cordisHostActivationPolicy` — `CordisHostActivationPolicy`
+
+Deployment provider; a session write permission is not permission to trust Host code.
+
+```ts cordis-catalog
+/**
+ * Authorize exact Host source using current verified approver privileges.
+ * @param request - Native identity and immutable source snapshot.
+ * @param signal - Native stop, undefine and runner-disposal cancellation.
+ * @returns A finite admission, or undefined to deny.
+ */
+authorize(request: Readonly<CordisHostActivationRequest>, signal: AbortSignal): Promise<CordisHostActivationLease | undefined>
+```
+
+Source: [`packages/extensions/cordis-host-runner/src/activation-policy.ts`](../../packages/extensions/cordis-host-runner/src/activation-policy.ts)
 
 <a id="ctxcordisinspect--cordisinspectregistryservice"></a>
 

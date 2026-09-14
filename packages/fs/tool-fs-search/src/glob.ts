@@ -38,6 +38,8 @@ export const GLOB_VCS_EXCLUDES: readonly string[] = ['.git', '.svn', '.hg', '.bz
 
 /** Resolved glob-tool caps — plugin config after defaulting (see `Config` in index.ts). */
 export interface GlobToolCaps {
+  /** Optional executable resolved inside the selected subprocess provider. */
+  executable?: string
   /** Whether over-cap pages are sampled across top-level entries instead of taking the modification-time head. */
   sampleOverCapGlobResults: boolean
   /** Max paths retained inline; later paths go to the formatted spill file. */
@@ -342,7 +344,10 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
     },
     async execute(args, exec) {
       const input = parseGlobArgs(args)
-      const run = await runRipgrep(ctx, exec, 'glob', buildGlobCommand(input), caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes)
+      const run = await runRipgrep(
+        ctx, exec, 'glob', buildGlobCommand(input),
+        caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes, caps.executable,
+      )
       const root = input.path === undefined ? '.' : toWorkdirRelative(input.path, run.workdir)
       if (run.noMatches) return { root, paths: [] }
 

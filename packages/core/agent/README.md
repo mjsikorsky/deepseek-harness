@@ -25,13 +25,15 @@ Use `dsh-agent` to create or resume live agents, send follow-up or steering inpu
 <a id="use-this-package"></a>
 ## Use this package
 
-An installed `ctx.agentLifecycleSetup` provider composes deployment-owned preparation with each caller’s `AgentSetup`. Its `prepare(agentCtx, agent)` receives the unpublished Agent and may return an `AgentSetupCommit`. Register rollback in the Agent scope. The driver finishes durable seed persistence before running synchronous caller and deployment commits, then publishes without another await. The provider owns authority and durable references; it does not replace caller presets, tools, or model selection.
+An installed `ctx.agentLifecycleSetup` provider composes deployment-owned preparation with each caller’s `AgentSetup`. Its `prepare(agentCtx, agent, capabilities)` receives the unpublished Agent and may return an `AgentSetupCommit`. Register rollback in the Agent scope. The driver finishes durable seed persistence before running synchronous caller and deployment commits, then publishes without another await. The provider owns authority and durable references; it does not replace caller presets, tools, or model selection.
+
+The third `prepare(agentCtx, agent, capabilities)` argument is frozen: `parent` is the explicit factory parent Agent, independent of ambient initiator attribution, and `terminate` is an exact-Agent authority termination capability. Calling `terminate()` synchronously stops current work, retains queued Inbox input, and begins the native persistence drain, scope cleanup and registry removal. It returns `void`, so a pre-step listener cannot await its own teardown; the factory observes asynchronous failures. Repeated calls share the first teardown and its Inbox policy. An old capability cannot terminate a fresh Agent resumed from the same Session. Ordinary `AgentHandle.dispose()` keeps its existing clear-Inbox behavior when it initiates teardown.
 
 Mount `dsh-agent` wherever live agents exist: it provides `ctx.agents` and the `Agent` handle that plugins, UI, hooks, and orchestrators work against. The service is inert until a driver registers a factory — the shipped driver is `dsh-agent-loop`, so the smallest useful composition loads both.
 
 ### Create or resume an agent
 
-`ctx.agents.create()` builds a fresh agent and session under one identity; `ctx.agents.resume()` loads a persisted session and rebuilds the agent on it. Both delegate to the registered factory and return an `AgentHandle` — the only object that can tear that agent down. Set `parentAgent` in either operation's options to make the result a runtime child; omit it for a runtime root. `get(id)`, `list()`, and `roots()` find live agents, and `isOwnedBy(id, parent)` tests that exact live relation.
+`ctx.agents.create()` builds a fresh agent and session under one identity; `ctx.agents.resume()` loads a persisted session and rebuilds the agent on it. Both delegate to the registered factory and return an `AgentHandle` — its caller-owned teardown capability. Set `parentAgent` in either operation's options to make the result a runtime child; omit it for a runtime root. `get(id)`, `list()`, and `roots()` find live agents, and `isOwnedBy(id, parent)` tests that exact live relation.
 
 ```text
 const handle = await ctx.agents.create({

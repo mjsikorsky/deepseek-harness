@@ -214,6 +214,7 @@ export function resolveRgPath(): Promise<string> {
  * @param rawOutputMaxBytes - cap on the complete raw stdout the tool will parse.
  * @param graceMs - the seam's terminate-escalation grace period.
  * @param stderrMaxBytes - cap on the retained stderr diagnostic tail.
+ * @param executable - optional executable resolved inside the selected subprocess provider.
  * @returns the complete stdout, the zero-result flag, and the resolved workdir.
  */
 export async function runRipgrep(
@@ -224,6 +225,7 @@ export async function runRipgrep(
   rawOutputMaxBytes: number,
   graceMs: number,
   stderrMaxBytes: number,
+  executable?: string,
 ): Promise<RipgrepRun> {
   if (exec.signal.aborted) {
     throw new SearchError(`${toolName} was aborted before completion (tool timeout or caller cancellation)`, 'SEARCH_ABORTED')
@@ -232,8 +234,11 @@ export async function runRipgrep(
   const workdir = cwd ?? process.cwd()
   let handle: SubprocessHandle
   try {
+    const command = executable === undefined
+      ? await resolveRgPath()
+      : await ctx.subprocess.resolveExecutable(executable, undefined, exec.signal)
     handle = ctx.subprocess.spawn({
-      argv: [await resolveRgPath(), '--no-config', ...argv],
+      argv: [command, '--no-config', ...argv],
       cwd: workdir,
       stdio: {
         stdin: 'ignore',

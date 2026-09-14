@@ -1,6 +1,7 @@
 /** Session-log download command and Host-owned streaming route. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-session-controller/types'
 import type { CommandDefinitionId } from '@deepseek-ai/dsh-commands/brand'
 import Schema from '@deepseek-ai/schemastery'
 import { brandString } from '@deepseek-ai/dsh-brand'
@@ -128,7 +129,14 @@ async function sessionLogExportResponse(
       { status: 500 },
     )
   }
+  const visibility = ctx.get('sessionVisibility')
+  const reader = visibility?.capture?.()
+  if (visibility && !reader) return new Response('session export authority unavailable', { status: 403 })
+  if (reader && !await reader.canRead(sessionId, request.signal)) {
+    return new Response('session export denied', { status: 403 })
+  }
   const ready: SessionLogExportReady = {
+    ...(reader ? { visibility: reader } : {}),
     sessionQuery: deps.sessionQuery,
     sessionPersistence: deps.sessionPersistence,
     attachments: deps.attachments,
@@ -139,6 +147,9 @@ async function sessionLogExportResponse(
     await flushLiveSessionLog(deps, sessionId, request.signal)
     rootContent = await readSessionLogText(deps.sessionPersistence, sessionId, request.signal)
     request.signal.throwIfAborted()
+    if (reader && !await reader.canRead(sessionId, request.signal)) {
+      return new Response('session export denied', { status: 403 })
+    }
   } catch {
     request.signal.throwIfAborted()
     // Root preparation failure (flush, open, or read): answer 500 without

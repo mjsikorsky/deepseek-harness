@@ -25,7 +25,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this plugin in a web client whose composition also mounts the host runner — the host half runs in the process, this browser half in the page. When a dynamic package that has a browser half is run, the open pages receive a run request; this package carries out the load on this page, and the UI package (`ui-cordis`) renders the panel and cards a person uses to answer it. Host-only packages need no browser half and therefore no page: the host runs them itself.
+Mount this plugin in a web client whose composition also mounts the host runner — the host half runs in the process, this browser half in the page. When a dynamic package that has a browser half is run, the open pages receive a run request; this package carries out the load on this page, and the UI package (`ui-cordis`) renders the panel and cards a person uses to answer it. Host-only packages use a page when the Host deployment requires code admission; the page settles that request without fetching or loading Client source.
 
 ### What the page does
 
@@ -33,7 +33,7 @@ A browser half is written in plain JavaScript — no JSX, no TypeScript, no modu
 
 ### What the run surface offers
 
-A run surface can answer a pending host request — approving it, optionally covering future versions of the same plugin, or declining it — and can start a definition at the user's own gesture, which authorizes it. Each definition has at most one in-flight activity, so an affordance built on that state survives a remount. What the surface shows about this page is page-local: the last render crash per package, why this page's own attempt failed, and whether a package is loaded here — never the host's view of what is running.
+A run surface can answer a pending host request — approving it, optionally covering future versions of the same plugin, or declining it — and can start a definition at the user's own gesture. Host code still requires any configured deployment authorization; approving future Client versions does not confer Host code trust. Each definition has at most one in-flight activity, so an affordance built on that state survives a remount. What the surface shows about this page is page-local: the last render crash per package, why this page's own attempt failed, and whether a package is loaded here — never the host's view of what is running.
 
 ### Lifecycle boundaries
 

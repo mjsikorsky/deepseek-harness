@@ -100,6 +100,8 @@ function dirOf(url: string): string {
 }
 
 interface SdkAssertions {
+  /** The actual deployment lifecycle fixture must drain, retain input, and resume a fresh Agent. */
+  deploymentTermination?: boolean
   /** Additional profile patches applied after the shared composition. */
   patches?: readonly string[]
   /** Final response required from a completed turn before updating goldens. */
@@ -124,6 +126,10 @@ interface SdkAssertions {
 }
 
 const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
+  'deployment-termination': {
+    deploymentTermination: true,
+    patches: [fileURLToPath(new URL('./deployment-termination/termination.cordis.yml', import.meta.url))],
+  },
   'ptc-turn': {
     patches: [fileURLToPath(new URL('./ptc-turn/runtime.cordis.yml', import.meta.url))],
     expectedFinalResponse: 'CODE_ONE+CODE_TWO',
@@ -446,7 +452,10 @@ function turnActions(log: string): TurnAction[] {
 function postTurnEventTypes(log: string): string[] {
   const values = records(log)
   const finalTurnEnd = values.findLastIndex(record => record.type === 'turn/end')
-  return values.slice(finalTurnEnd + 1).flatMap(record => typeof record.type === 'string' ? [record.type] : [])
+  // Session constructor resume markers are durable history, never live session/event notifications.
+  // The persisted transcript comparison below still verifies their exact presence and position.
+  return values.slice(finalTurnEnd + 1).flatMap(record =>
+    typeof record.type === 'string' && record.type !== 'session/end-seed' ? [record.type] : [])
 }
 
 function materializeInput(
@@ -645,6 +654,10 @@ async function runScenario(scenario: CorpusScenario): Promise<{
       }
     } finally {
       subscription.close()
+    }
+    if (assertions.deploymentTermination === true) {
+      await expect.poll(async () => JSON.parse(await readFile(join(dshHome, 'lifecycle-receipt.json'), 'utf8')), { timeout: 10_000 })
+        .toEqual({ sameSession: true, freshAgent: true, queuedPreserved: true, staleRevocationRejected: true, drained: true })
     }
     await harness.close()
     const logs = (await Promise.all([

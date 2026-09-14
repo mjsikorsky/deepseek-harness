@@ -6,6 +6,8 @@ The **core** subsystem is [`packages/core`](../../packages/core/README.md) — t
 
 An installed `ctx.agentLifecycleSetup` provider composes `AgentLifecycleSetup.prepare()` with caller `AgentSetup`, preserving presets and scoped tools. AgentLoop awaits durable seed appends before synchronous caller and deployment commits, then publishes without another await. Provider rejection prevents creation events and registry visibility; durable preparation remains its owner’s reconciliation responsibility.
 
+The third `prepare(agentCtx, agent, capabilities)` argument is frozen: `parent` is the explicit factory parent Agent, independent of ambient initiator attribution, and `terminate` is an exact-Agent authority termination capability. Calling `terminate()` synchronously stops current work, retains queued Inbox input, and begins the native persistence drain, scope cleanup and registry removal. It returns `void`, so a pre-step listener cannot await its own teardown; the factory observes asynchronous failures. Repeated calls share the first teardown and its Inbox policy. An old capability cannot terminate a fresh Agent resumed from the same Session. Ordinary `AgentHandle.dispose()` keeps its existing clear-Inbox behavior when it initiates teardown.
+
 ## The spine, package by package
 
 A turn flows through the six packages in one loop: the driver in [`agent-loop`](../../packages/core/agent-loop) claims a queued prompt, opens a turn on the [session log](session.md) (`ctx.sessions`), assembles the request prefix through [system-prompt](system-prompt.md) (`ctx.systemPrompt`) and derives history from the log, streams the model response through the [LLM seam](llm-streaming.md), dispatches tool calls through the [tool registry](tools.md) (`ctx.tools`), and appends every model-visible fact back onto the log before the next step derives from it. The conversation vocabulary the loop moves — `Message`, `ContentBlock`, `StreamChunk`, the model request — is declared by [`packages/llm`](../../packages/llm/README.md) and documented on [llm-streaming.md](llm-streaming.md).
@@ -31,7 +33,9 @@ Source: [`packages/core/agent/src/index.ts`](../../packages/core/agent/src/index
 /**
  * An owned agent plus its disposer, returned by {@link AgentRegistry.create} /
  * {@link AgentRegistry.resume}. The disposer is a CAPABILITY: among consumers,
- * only the holder can tear this agent down. The registered factory provider is
+ * the holder can tear this agent down. A deployment lifecycle provider receives
+ * a separate exact-agent termination capability that preserves queued input.
+ * The registered factory provider is
  * also a structural owner because the scoped agent depends on that provider's
  * service API; provider unload stops and drains every live handle it made.
  * `dispose()` stops the loop, awaits its exit, unregisters the agent, removes
@@ -456,9 +460,16 @@ Deployment-owned setup composed with every caller's existing Agent setup.
  * A returned commit executes after persistence settles, immediately before publication.
  * @param agentCtx - unpublished Agent scope owning prepared effects.
  * @param agent - unpublished Agent being composed.
+ * @param capabilities - immutable factory-owned parent reference and exact lifecycle termination.
+ * The parent is the explicit creation/resume parent, never ambient initiator attribution.
+ * Termination revokes authority. Stops the Agent
+ * synchronously, preserves queued inbox messages, then drains persistence and removes
+ * both live registry entries. Returns void so a pre-step listener cannot await its own
+ * completion; the factory observes asynchronous teardown failures. Repeated calls are
+ * inert, including after the same Session is resumed as a different Agent.
  * @returns optional publication commit, after preparation finishes.
  */
-prepare(agentCtx: Context, agent: Agent): ReturnType<AgentSetup>
+prepare( agentCtx: Context, agent: Agent, capabilities: Readonly<{ terminate: () => void; parent: Agent | undefined }>, ): ReturnType<AgentSetup>
 ```
 
 Source: [`packages/core/agent/src/index.ts`](../../packages/core/agent/src/index.ts)

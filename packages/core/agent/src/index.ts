@@ -61,9 +61,19 @@ export interface AgentLifecycleSetup {
    * A returned commit executes after persistence settles, immediately before publication.
    * @param agentCtx - unpublished Agent scope owning prepared effects.
    * @param agent - unpublished Agent being composed.
+   * @param capabilities - immutable factory-owned parent reference and exact lifecycle termination.
+   * The parent is the explicit creation/resume parent, never ambient initiator attribution.
+   * Termination revokes authority. Stops the Agent
+   * synchronously, preserves queued inbox messages, then drains persistence and removes
+   * both live registry entries. Returns void so a pre-step listener cannot await its own
+   * completion; the factory observes asynchronous teardown failures. Repeated calls are
+   * inert, including after the same Session is resumed as a different Agent.
    * @returns optional publication commit, after preparation finishes.
    */
-  prepare(agentCtx: Context, agent: Agent): ReturnType<AgentSetup>
+  prepare(
+    agentCtx: Context, agent: Agent,
+    capabilities: Readonly<{ terminate: () => void; parent: Agent | undefined }>,
+  ): ReturnType<AgentSetup>
 }
 
 /**
@@ -160,7 +170,9 @@ export interface ResumeAgentOptions {
 /**
  * An owned agent plus its disposer, returned by {@link AgentRegistry.create} /
  * {@link AgentRegistry.resume}. The disposer is a CAPABILITY: among consumers,
- * only the holder can tear this agent down. The registered factory provider is
+ * the holder can tear this agent down. A deployment lifecycle provider receives
+ * a separate exact-agent termination capability that preserves queued input.
+ * The registered factory provider is
  * also a structural owner because the scoped agent depends on that provider's
  * service API; provider unload stops and drains every live handle it made.
  * `dispose()` stops the loop, awaits its exit, unregisters the agent, removes

@@ -457,3 +457,18 @@ describe('startUserRun', () => {
       .toEqual({ packageId: PACKAGE, reason: 'host-half-failed', ok: false, message: 'vm exploded' })
   })
 })
+
+
+describe('Host-only approval card', () => {
+  it('settles the exact native request without fetching or evaluating Client source', async () => {
+    const bench = boot()
+    bench.orchestrator.open({ requestId: REQ, agentId: AGENT, pluginId: PLUGIN,
+      packageId: PACKAGE, mode: 'run', name: 'Host code', purpose: 'exact reviewed source',
+      requiresApproval: true, hasClientHalf: false })
+    await bench.orchestrator.approve(REQ, false)
+    expect(bench.host.runHostHalf).toHaveBeenCalledWith(AGENT, PLUGIN, PACKAGE, 'run', REQ, false)
+    expect(bench.host.getClientCode).not.toHaveBeenCalled()
+    expect(bench.load).not.toHaveBeenCalled()
+    expect(bench.host.resolveRequestRun).toHaveBeenCalledWith(REQ, { ok: true, pluginRunId: RUN })
+  })
+})

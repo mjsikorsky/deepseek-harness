@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, describe, expect, it, vi, type TestContext } from 'vitest'
 import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk'
 import { runScenario, snapshotSpillRoot, type AgentUnderTest, type InputStep } from '../src/harness.ts'
-import { launchAcpTestAgent } from '../src/launcher.ts'
+import { launchAcpTestAgent, materializeProfilePatch } from '../src/launcher.ts'
 
 const fsControl = vi.hoisted(() => ({
   cleanupFailure: undefined as Error | undefined,
@@ -175,6 +175,33 @@ describe('runScenario', () => {
     await expect(minimal.close('SIGTERM')).rejects.toBe(childFailure)
     // close rejects only after the fallback SIGKILL has produced an exit edge.
     expect(exited).toBe(true)
+  })
+
+  it('links its installed replay dependency for isolated fixtures and keeps authored package precedence', async () => {
+    const { dir } = await scenario({})
+    const patchDir = join(dir, 'patches')
+    const outputDir = join(dir, 'materialized')
+    await Promise.all([mkdir(patchDir), mkdir(outputDir)])
+    const patch = join(patchDir, 'replay.yml')
+    const replayName = '@deepseek-ai/dsh-llm-replay'
+    await writeFile(patch, `- insert:\n    - id: replay\n      name: '${replayName}'\n`)
+    const materialized = materializeProfilePatch(patch, dir, outputDir, 0)
+    const installed = fileURLToPath(new URL('.', import.meta.resolve('@deepseek-ai/dsh-llm-replay/package.json')))
+    const link = join(dir, '.dsh', 'profiles', 'node_modules', replayName)
+    expect(await realpath(link)).toBe(await realpath(installed))
+    expect(await readFile(materialized, 'utf8')).toContain(replayName)
+
+    // An authored package owns its identity even when the helper also installs that name.
+    const authored = join(dir, 'node_modules', replayName)
+    await mkdir(authored, { recursive: true })
+    await writeFile(join(authored, 'package.json'), JSON.stringify({ name: replayName, version: '0.0.0' }))
+    const secondCwd = join(dir, 'second')
+    await mkdir(secondCwd)
+    materializeProfilePatch(patch, secondCwd, outputDir, 1)
+    expect(await realpath(join(secondCwd, '.dsh', 'profiles', 'node_modules', replayName)))
+      .toBe(await realpath(authored))
+    expect(() => materializeProfilePatch(patch, dir, outputDir, 2))
+      .toThrow('resolves to two directories')
   })
 
   it('builds dsh profile argv and rebases relative modules in live and replay patches', async () => {

@@ -1,0 +1,5 @@
+- insert:
+    - id: snapshot-deployment-termination
+      name: '../../../packages/test-support/session-snapshot/tests/fixtures/deployment-termination.mjs'
+      config:
+        receiptPath: !!js dshHomePath('lifecycle-receipt.json')

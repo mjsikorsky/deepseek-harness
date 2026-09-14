@@ -10,7 +10,7 @@
  * Real-`rg` behavior is pinned separately in integration.spec.ts.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import { join, sep } from 'node:path'
@@ -1264,3 +1264,64 @@ describe('scope-aware search guidance', () => {
 function withPersona(...sections: string[]): string {
   return ['You are an AI agent powered by DeepSeek Harness.', ...sections].join('\n\n')
 }
+
+describe('configured execution-world search executable', () => {
+  it('rejects an empty executable before registering tools', async () => {
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(FakeSubprocess)
+      await expect(ctx.plugin(ToolFsSearch, { ...DEFAULT_CONFIG, executable: '  ' }))
+        .rejects.toThrow('tool-fs-search: executable must be non-empty')
+      expect(ctx.tools.get('glob')).toBeUndefined()
+      expect(ctx.tools.get('grep')).toBeUndefined()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each(['glob', 'grep'])('resolves %s through its native subprocess provider', async (name) => {
+    const { ctx, subprocess } = await setup({ config: { executable: 'guest-rg' } })
+    const resolve = vi.spyOn(subprocess, 'resolveExecutable').mockResolvedValue('/guest/bin/rg')
+    try {
+      const result = await call(ctx, name, { pattern: 'needle' })
+      expect(result.isError).toBe(false)
+      expect(resolve).toHaveBeenCalledWith('guest-rg', undefined, expect.any(AbortSignal))
+      expect(subprocess.spawns).toHaveLength(1)
+      expect(subprocess.spawns[0]?.argv.slice(0, 2)).toEqual(['/guest/bin/rg', '--no-config'])
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('does not fall back to a host binary when provider resolution fails', async () => {
+    const { ctx, subprocess } = await setup({ config: { executable: 'missing-guest-rg' } })
+    vi.spyOn(subprocess, 'resolveExecutable').mockRejectedValue(new Error('guest binary is absent'))
+    try {
+      const result = await call(ctx, 'glob', { pattern: '*' })
+      expect(result.isError).toBe(true)
+      expect(text(result)).toContain('could not start its search command')
+      expect(subprocess.spawns).toHaveLength(0)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('preserves cancellation during provider executable resolution without spawning', async () => {
+    const { ctx, subprocess } = await setup({ config: { executable: 'guest-rg' } })
+    const controller = new AbortController()
+    vi.spyOn(subprocess, 'resolveExecutable').mockImplementation(async () => {
+      controller.abort()
+      throw new Error('resolution cancelled')
+    })
+    try {
+      const result = await call(ctx, 'grep', { pattern: 'needle' }, { signal: controller.signal })
+      expect(result.isError).toBe(true)
+      expect(text(result)).toMatch(/aborted/i)
+      expect(subprocess.spawns).toHaveLength(0)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+})
