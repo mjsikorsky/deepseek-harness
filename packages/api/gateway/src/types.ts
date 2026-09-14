@@ -157,3 +157,62 @@ declare module '@deepseek-ai/cordis' {
     typertGateway: TypertGateway
   }
 }
+
+/** Original request facts presented to a trusted, installed access provider. */
+export interface GatewayCarrierRequest {
+  readonly method?: string | undefined
+  readonly url?: string | undefined
+  readonly headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>
+}
+
+/** Native wire operation; the Gateway continues to own all decoding and dispatch. */
+export interface GatewayAccessOperation {
+  readonly endpoint: string
+  readonly payload: unknown
+}
+
+/** Per-request/transport capability. No browser value can construct this lease. */
+export interface GatewayAccessLease {
+  readonly signal: AbortSignal
+  /**
+   * Run native dispatch within a provider-owned, invocation-bounded authority scope.
+   * @param operation - operation already accepted by this lease.
+   * @param dispatch - original native call or iterator advancement.
+   * @returns the unchanged native result; inherited authority ends when this call settles.
+   */
+  run<T>(operation: GatewayAccessOperation, dispatch: () => Promise<T>): Promise<T>
+  /**
+   * Authorize an operation before its native implementation runs.
+   * @param operation - native endpoint and decoded carrier payload.
+   * @returns after authorization, or rejects without invoking the native operation.
+   */
+  check(operation: GatewayAccessOperation): Promise<void>
+  /**
+   * Authorize/project a settled result or one stream item before delivery.
+   * @param operation - operation that produced the value.
+   * @param value - native result before client delivery.
+   * @returns an authorized value, or a drop decision; hidden waterfalls lose their native delivery record.
+   */
+  project(
+    operation: GatewayAccessOperation, value: unknown,
+  ): Promise<{ readonly keep: true; readonly value: unknown } | { readonly keep: false }>
+  /** Release this carrier without deleting native work or history. */
+  release(): void
+}
+
+/** Trusted deployment provider; absence/denial is never a default identity. */
+export interface GatewayAccessProvider {
+  /**
+   * Verify carrier authority and capture its independently expiring lifetime.
+   * @param request - original request facts, including server-forwarded proof headers.
+   * @returns one owned lease, or undefined to deny the request.
+   */
+  admit(request: GatewayCarrierRequest): Promise<GatewayAccessLease | undefined>
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Deployment-owned admission and delivery policy for native Remote carriers. */
+    gatewayAccess: GatewayAccessProvider
+  }
+}

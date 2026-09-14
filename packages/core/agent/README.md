@@ -25,6 +25,8 @@ Use `dsh-agent` to create or resume live agents, send follow-up or steering inpu
 <a id="use-this-package"></a>
 ## Use this package
 
+An installed `ctx.agentLifecycleSetup` provider composes deployment-owned preparation with each caller’s `AgentSetup`. Its `prepare(agentCtx, agent)` receives the unpublished Agent and may return an `AgentSetupCommit`. Register rollback in the Agent scope. The driver finishes durable seed persistence before running synchronous caller and deployment commits, then publishes without another await. The provider owns authority and durable references; it does not replace caller presets, tools, or model selection.
+
 Mount `dsh-agent` wherever live agents exist: it provides `ctx.agents` and the `Agent` handle that plugins, UI, hooks, and orchestrators work against. The service is inert until a driver registers a factory — the shipped driver is `dsh-agent-loop`, so the smallest useful composition loads both.
 
 ### Create or resume an agent

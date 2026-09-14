@@ -1,11 +1,19 @@
 import { Context } from '@deepseek-ai/cordis'
 import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
 import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
-import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
+import SessionStore, { SESSION_FORMAT_VERSION, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionHandle } from '@deepseek-ai/dsh-session-persistence'
 import { strFromU8, unzipSync } from 'fflate'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import SessionQuerySqlite from '@deepseek-ai/dsh-session-query-sqlite'
+import LocalAttachmentStore from '@deepseek-ai/dsh-attachment-local'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   Config,
   SESSION_LOG_FILENAME,
@@ -103,5 +111,85 @@ describe('Session log export Fetch route', () => {
     for (const compressionLevel of [-1, 10, 1.5]) {
       expect(() => Config({ compressionLevel } as never)).toThrow()
     }
+  })
+})
+
+/** A real cold native JSONL Session, SQLite query owner and native ZIP producer. */
+async function guardedExport() {
+  const directory = await mkdtemp(join(tmpdir(), 'native-guarded-export-'))
+  const ctx = new Context()
+  await ctx.plugin(CommandRuntime)
+  await ctx.plugin(JsonlSessionPersistence, { root: join(directory, 'sessions'), compression: 'none' })
+  await ctx.plugin(SessionStore)
+  await ctx.plugin(SessionQuerySqlite, { path: ':memory:' })
+  await ctx.plugin(LocalAttachmentStore, { dshHome: directory })
+  for (const id of ['authorized-export', 'foreign-export']) {
+    const stored = await ctx.sessionPersistence.create(readHandle(id).header)
+    try {
+      await stored.append([{ type: 'user/message', seq: SessionSeq(0), time: 2, surfaceOp: 'append',
+        data: createUserMessage({ content: [{ type: 'text', text: 'private native history ' + id }], source: { kind: 'user' } }),
+      }])
+    } finally { await stored.close() }
+  }
+  const connection = new HostConnectionService(ctx, [], {} as BrowserAuth, true)
+  await ctx.plugin({ inject: [...inject], apply })
+  return { ctx, shared: connection.createSharedFetchHandler('/api'), async close() { await ctx.fiber.dispose(); await rm(directory, { recursive: true, force: true }) } }
+}
+
+describe('native Session export request authority', () => {
+  it('denies unowned roots/descendant expansion before native reads and retains the lease through the ZIP body', async () => {
+    const f = await guardedExport()
+    try {
+      const open = vi.spyOn(f.ctx.sessionPersistence, 'open')
+      const trace = vi.spyOn(f.ctx.sessionQuery, 'traceSession')
+      const allowed = `http://host${SESSION_LOG_EXPORT_PATH}?sessionId=authorized-export`
+      expect((await f.shared.fetch(new Request(allowed))).status).toBe(403)
+      expect(open).not.toHaveBeenCalled()
+      let released = 0
+      const life = new AbortController()
+      f.ctx.provide('connectionRequestPolicy', { async admit(metadata) {
+        const query = new URL(metadata.url).searchParams
+        if (query.get('sessionId') !== 'authorized-export' || query.get('includeDescendants') === 'true') return
+        return { signal: life.signal,
+          async run<T>(dispatch: () => Promise<T>) { life.signal.throwIfAborted(); return dispatch() },
+          release() { released++ },
+        }
+      } })
+      expect((await f.shared.fetch(new Request(`http://host${SESSION_LOG_EXPORT_PATH}?sessionId=foreign-export`))).status).toBe(403)
+      expect((await f.shared.fetch(new Request(allowed + '&includeDescendants=true'))).status).toBe(403)
+      expect(open).not.toHaveBeenCalled()
+      expect(trace).not.toHaveBeenCalled()
+      const response = await f.shared.fetch(new Request(allowed))
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type')).toBe('application/zip')
+      expect(released).toBe(0)
+      const files = unzipSync(new Uint8Array(await response.arrayBuffer()))
+      expect(strFromU8(files[SESSION_LOG_FILENAME]!)).toContain('private native history authorized-export')
+      expect(strFromU8(files[SESSION_LOG_FILENAME]!)).not.toContain('foreign-export')
+      expect(released).toBe(1)
+      const head = await f.shared.fetch(new Request(allowed, { method: 'HEAD' }))
+      expect(head.status).toBe(200)
+      expect(head.body).toBeNull()
+      expect(released).toBe(2)
+    } finally { await f.close() }
+  })
+
+  it('withdraws the actual ZIP response body when its request lease is revoked after headers', async () => {
+    const f = await guardedExport()
+    try {
+      const life = new AbortController(); let released = 0
+      f.ctx.provide('connectionRequestPolicy', { async admit() {
+        return { signal: life.signal,
+          async run<T>(dispatch: () => Promise<T>) { life.signal.throwIfAborted(); return dispatch() },
+          release() { released++ },
+        }
+      } })
+      const response = await f.shared.fetch(new Request(`http://host${SESSION_LOG_EXPORT_PATH}?sessionId=authorized-export`))
+      expect(response.status).toBe(200)
+      expect(released).toBe(0)
+      life.abort(new Error('Current workspace membership revoked'))
+      await expect(response.arrayBuffer()).rejects.toThrow('Current workspace membership revoked')
+      await vi.waitFor(() => { expect(released).toBe(1) })
+    } finally { await f.close() }
   })
 })

@@ -611,3 +611,20 @@ declare module '@deepseek-ai/cordis' {
 
 /** JSON-compatible projection value accepted by list consumers. */
 export type SessionProjectionValue = JsonValue
+
+/** Deployment-owned visibility before native list/search pagination. */
+export interface SessionVisibility {
+  /**
+   * Check the current invocation's authority against this exact native Session.
+   * @param sessionId - exact native Session identity.
+   * @param signal - caller cancellation.
+   * @returns whether this invocation may include the Session in its results.
+   */
+  canRead(sessionId: SessionId, signal?: AbortSignal): Promise<boolean>
+}
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Optional owner policy; absent preserves the original single-owner host behavior. */
+    sessionVisibility: SessionVisibility
+  }
+}

@@ -12,6 +12,8 @@
 
 不存在需要打补丁的特权内核：扩展 dsh 的方式是把插件挂载到其他插件旁边，而各项注册都是副作用，会在其插件卸载时撤销。
 
+共享 Host 部署使用 [Gateway](../packages/api/gateway/README.zh.md) 准入和投递租约、[SessionController](../packages/api/session-controller/README.zh.md) 分页前可见性，以及 [AgentLoop](../packages/core/agent-loop/README.zh.md) 发布前的准备和提交。部署插件负责身份、工作区绑定和持久授权；原生传输、预设和工具保留各自的所有者。
+
 ## Profile 与组合包
 
 运行中的 `dsh` 是一棵插件树，由启动时按序叠加的各层组合而成。

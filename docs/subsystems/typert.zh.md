@@ -4,6 +4,11 @@
 
 以下类型由生成的 Remote 产物、Host Gateway 与消费方 API assembly 共用。[Typert Gateway Agent Note](../../.agents/notes/implemented/architecture/2026-08-02-typert-remote-method-calls.zh.md) 负责架构与传输决策；本页记录 [`dsh-typert-protocol`](../../packages/typert/protocol/src/types.ts) 和 [`dsh-api-gateway`](../../packages/api/gateway/src/types.ts) 中公共约定的字面定义。
 
+Gateway 可以要求 `ctx.gatewayAccess`：`GatewayAccessProvider.admit()` 接收原始传输请求并返回有期限的 `GatewayAccessLease`。其 `run`、`check`、`project`、`signal` 和 `release` 操作将权限与原生分派、mux 读取、事件投递和审批回复组合。此扩展保留生成的编解码器和现有线协议；部署插件负责身份和工作区策略。
+
+
+配置为必需时，Connection 通过 `ctx.connectionRequestPolicy` 对每个 HTTP 路由进行准入。`ConnectionRequestPolicy.admit(request)` 返回 `ConnectionRequestLease`，其 `run`、`signal` 和 `release` 在原生分派及输入输出流期间维持资源权限；原始文件、上传和导出处理器不能绕过该接口。此接口不解析 RPC 请求体，也不替代 Gateway 操作检查。
+
 ## Lookup 与上下文声明
 
 业务对象包通过声明合并扩展两个空 map。lookup 将一种 Host 对象类型与其 wire identity 关联；上下文声明将一种作用域上下文类别与其 wire identity 关联。生成的 descriptor 引用这些 key，运行时提供方则提供活对象解析行为。
@@ -241,6 +246,23 @@ interface TypertClientRemote extends TypertRemoteNamespaceMap {
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxgatewayaccess--gatewayaccessprovider"></a>
+
+### `ctx.gatewayAccess` — `GatewayAccessProvider`
+
+Trusted deployment provider; absence/denial is never a default identity.
+
+```ts cordis-catalog
+/**
+ * Verify carrier authority and capture its independently expiring lifetime.
+ * @param request - original request facts, including server-forwarded proof headers.
+ * @returns one owned lease, or undefined to deny the request.
+ */
+admit(request: GatewayCarrierRequest): Promise<GatewayAccessLease | undefined>
+```
+
+Source: [`packages/api/gateway/src/types.ts`](../../packages/api/gateway/src/types.ts)
 
 <a id="ctxtypert--typertregistry"></a>
 

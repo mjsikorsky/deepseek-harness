@@ -4,6 +4,8 @@
 
 **核心**子系统即 [`packages/core`](../../packages/core/README.zh.md)，包含每个组合都会启动的包：事件溯源的会话日志、系统提示词组装、工具注册表、agent（智能体）类型，以及驱动它们的具体循环。本页说明 `agent`/`agent-loop` 这对包所声明的内容：agent 如何被创建与拥有，以及 `Agent` 句柄的投递、取消与拦截约定；本页还说明每个子系统都遵循的两个类型模式。该组的专属页面与目录其余部分见[子系统 README](README.zh.md)。
 
+已安装的 `ctx.agentLifecycleSetup` 提供者会将 `AgentLifecycleSetup.prepare()` 与调用者的 `AgentSetup` 组合，保留预设和作用域工具。AgentLoop 等待持久种子追加后同步执行调用者和部署的提交，随后不再等待便发布。提供者拒绝时，不会发出创建事件或在注册表中可见；持久准备的协调仍由其所有者负责。
+
 ## 主干逐包速览
 
 一个轮次按同一条循环流经六个包：[`agent-loop`](../../packages/core/agent-loop) 中的 driver 认领一条排队的提示词，在[会话日志](session.zh.md)（`ctx.sessions`）上开启轮次，通过 [system-prompt](system-prompt.zh.md)（`ctx.systemPrompt`）组装请求前缀并从日志派生历史，经 [LLM（大语言模型） seam](llm-streaming.zh.md) 流式获取模型响应，经[工具注册表](tools.zh.md)（`ctx.tools`）分发工具调用，并把每个模型可见的事实追加回日志，供下一步派生。循环搬运的对话词汇——`Message`、`ContentBlock`、`StreamChunk`、模型请求——由 [`packages/llm`](../../packages/llm/README.zh.md) 声明，记录在 [llm-streaming.md](llm-streaming.zh.md)。
@@ -450,6 +452,26 @@ async saveSelection(next: ModelSelection): Promise<void>
 ```
 
 Source: [`packages/core/agent-default-model/src/index.ts`](../../packages/core/agent-default-model/src/index.ts)
+
+<a id="ctxagentlifecyclesetup--agentlifecyclesetup"></a>
+
+### `ctx.agentLifecycleSetup` — `AgentLifecycleSetup`
+
+Deployment-owned setup composed with every caller's existing Agent setup.
+
+```ts cordis-catalog
+/**
+ * Prepare authority and durable references while the Agent is unpublished.
+ * Preserve caller presets and tools. Register rollback through agentCtx.
+ * A returned commit executes after persistence settles, immediately before publication.
+ * @param agentCtx - unpublished Agent scope owning prepared effects.
+ * @param agent - unpublished Agent being composed.
+ * @returns optional publication commit, after preparation finishes.
+ */
+prepare(agentCtx: Context, agent: Agent): ReturnType<AgentSetup>
+```
+
+Source: [`packages/core/agent/src/index.ts`](../../packages/core/agent/src/index.ts)
 
 <a id="ctxagentloop--agentloop"></a>
 

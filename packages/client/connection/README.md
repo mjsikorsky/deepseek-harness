@@ -25,12 +25,16 @@ The package carries browser-to-Host Remote calls, exact Fetch responses, and con
 <a id="use-this-package"></a>
 ## Use this package
 
+`ClientTransportHooks.openMuxSocket` supplies a physical `ClientMuxSocket` to the native Gateway mux, synchronously or after asynchronous admission. The factory receives the target URL and attempt cancellation signal. Native Gateway retains all logical stream framing and retries, closes late factory returns, and ends the signal on socket loss. This per-page hook composes with `fetch`; `rpc` or `openStream` still selects a complete logical carrier.
+
 The browser uses HTTP POST for Remote unary calls. API Gateway owns the `/api/remote.mux` WebSocket and its logical streams; shell-owned compositions provide equivalent Remote streams through `connection.rpc.open` without opening a WebSocket. The Host half always provides the carrier-neutral RPC and exact `GET`/`HEAD`/`POST` route registries. When a Web carrier is present it also owns the sole `/api` route, Fetch bridge, browser authentication, and Host/Origin checks; a shell-owned carrier dispatches the shared Fetch handler directly. Each exact route declares buffered or streaming request-body handling before the bridge reads any bytes. Typert Gateway claims generated Remote endpoints, feature packages register non-JSON responses such as Session-log downloads and raw file uploads, and unclaimed requests return 404. Loopback hostname classification remains package-internal to the browser-facing Client state. Browser raw-body transfer is provided by [`dsh-client-file-upload`](../file-upload/README.md).
 
 -----
 
 <a id="browser-authentication-and-request-trust"></a>
 ## Browser authentication and request trust
+
+Deployment hosts can set `requireRequestPolicy: true` and provide `ctx.connectionRequestPolicy`. Its `admit` receives immutable method, URL, headers and cancellation facts, and returns a finite `ConnectionRequestLease`. Every exact Fetch route, shared HTTP interceptor and custom HTTP RPC channel passes this seat before its handler; there is no registration exemption. Native input and output pulls run through the lease. Revocation or provider disposal rejects pending consumers, cancels sources and releases authority even when a handler or source ignores cancellation. The existing buffered bridge still enforces its body limit before dispatch. Gateway retains finer operation and event authorization using the same deployment authority. Separately registered WebServer routes and WebSocket upgrades remain their owners’ responsibility.
 
 Every Host RPC method and WebSocket stream requires one browser session; there is no method-specific loopback tier. Each process mints a random launch token. `dsh-web-app` prints and opens the ordinary root URL with `?token=...`; `frontend-static` delegates root and index requests to `ctx.connection.authorizeIndex`, which accepts that token only on `GET /`, writes an authority-bound signed cookie, and redirects to clean `/`. A missing, expired, malformed, or wrong-authority cookie returns 401 before RPC dispatch. Static assets remain public. The HTTP carrier accepts no query token outside the root exchange and no Authorization-header token.
 

@@ -1,0 +1,81 @@
+name: LEGION native source qualification
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: legion-native-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+  DSH_GATE_CONCURRENCY: '1'
+  DSH_SNAPSHOT_MAX_CONCURRENCY: '1'
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build native packages and browser artifacts
+        run: pnpm run build
+      - name: Native carrier and lifecycle regressions
+        run: >-
+          pnpm exec vitest run
+          packages/api/gateway/tests/gateway-stream.host.spec.ts
+          packages/api/gateway/tests/gateway.client.spec.ts
+          packages/api/gateway/tests/carrier.client.spec.ts
+          packages/core/agent-loop/tests/deployment-lifecycle.spec.ts
+          packages/client/connection/tests/node-half.host.spec.ts
+          packages/client/connection/tests/request-policy.host.spec.ts
+          packages/client/file-upload/tests/file-upload-http.host.spec.ts
+          packages/session-query/session-log-export/tests/route.host.spec.ts
+          packages/api/session-controller/tests/session-search.host.spec.ts
+          packages/api/session-controller/tests/session-list-blank.host.spec.ts
+          --maxWorkers=1 --no-file-parallelism
+      - name: Native documentation consistency
+        run: pnpm run doc-sync
+      - name: Native package hygiene
+        run: pnpm run hygiene
+      - name: Native lint against built contracts
+        run: pnpm run lint:contracts-ready
+      - name: Keyless SDK lifecycle compatibility
+        env:
+          DSH_EXAMPLE_MODE: lib
+        run: >-
+          pnpm exec vitest run --config vitest.snapshot.config.ts
+          snapshots/sdk/sdk.snapshot.ts
+          -t 'replays (text-turn|multi-turn|subagent-continuable) through'
+          --maxWorkers=1 --no-file-parallelism
+      - name: Built SDK scope ownership
+        run: >-
+          pnpm exec vitest run --config vitest.e2e.config.ts
+          packages/sdk/server/tests/built-scope-carrier.e2e.ts
+          packages/core/agent-loop/tests/deployment-loader-built.e2e.ts
+          --maxWorkers=1 --no-file-parallelism
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install Python SDK validation dependency
+        run: python -m pip install 'pydantic>=2.12,<3'
+      - name: Python SDK lifecycle projections against the built native CLI
+        env:
+          PYTHONPATH: ${{ github.workspace }}/python/sdk/src
+        run: |
+          python scripts/smoke-python-runtime.py --scenario sdk-restart --exe "$GITHUB_WORKSPACE/apps/cli/lib/bin.js"
+          python scripts/smoke-python-runtime.py --scenario sdk-snapshot --exe "$GITHUB_WORKSPACE/apps/cli/lib/bin.js"

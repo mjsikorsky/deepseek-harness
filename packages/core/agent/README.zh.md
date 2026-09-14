@@ -25,6 +25,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+已安装的 `ctx.agentLifecycleSetup` 提供者会将部署负责的准备工作与各调用者的 `AgentSetup` 组合。其 `prepare(agentCtx, agent)` 接收尚未发布的 Agent，并可返回 `AgentSetupCommit`。回滚操作应注册在 Agent 作用域中。驱动器先完成种子事件的持久化，再同步执行调用者和部署的提交，然后在不再等待的情况下发布。提供者负责权限和持久引用，不会替换调用者的预设、工具或模型选择。
+
 在存在实时 agent 的任何地方挂载 `dsh-agent`：它提供 `ctx.agents` 以及插件、UI、钩子和编排器所面向编程的 `Agent` 句柄。在没有驱动器注册工厂之前，该服务保持惰性——随附驱动器是 `dsh-agent-loop`，因此最小的可用组合需要同时加载两者。
 
 ### 创建或恢复 agent

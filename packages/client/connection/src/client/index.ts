@@ -71,6 +71,37 @@ export interface ConnectionStateSource {
 /** Required services (none — this is the wire root). */
 export const inject: string[] = []
 
+/** Physical socket surface consumed by native Remote multiplexing. */
+export interface ClientMuxSocket extends EventTarget {
+  /** Standard WebSocket connection-state number. */
+  readonly readyState: number
+  /**
+   * Send one native mux frame.
+   * @param data - serialized native protocol frame.
+   * @returns after the carrier accepts the frame.
+   */
+  send(data: string): void
+  /**
+   * End this physical carrier.
+   * @param code - WebSocket close code, when supplied.
+   * @param reason - WebSocket close reason, when supplied.
+   * @returns after initiating closure; the carrier reports its close event.
+   */
+  close(code?: number, reason?: string): void
+}
+
+/**
+ * Open one physical carrier, retaining native Remote framing and retries.
+ * The signal ends on attempt cancellation or socket loss. A late result is closed.
+ * Shells may return synchronously; authenticated browser shells may await a grant.
+ * @param url - native mux URL for the current page origin.
+ * @param signal - lifetime of this carrier attempt and its resulting socket.
+ * @returns the physical socket; native Remote owns its protocol listeners.
+ */
+export type ClientMuxSocketFactory = (
+  url: string, signal: AbortSignal,
+) => ClientMuxSocket | Promise<ClientMuxSocket>
+
 /**
  * Carrier override installed on the page global before plugin boot. The served
  * web app leaves it unset and gets HTTP + WebSocket; a shell that owns a
@@ -84,6 +115,8 @@ export interface ClientTransportHooks {
    * Host such as a test mock plugs in here).
    */
   rpc?: ClientConnectionRpc
+  /** Physical mux carrier only; ignored when the logical rpc/openStream carrier is supplied. */
+  openMuxSocket?: ClientMuxSocketFactory
   /** Transport for generic unary RPC channels (the Typert gateway); unused when `rpc` is present. */
   fetch?: RpcFetch
   /** Worker-local Gateway stream carrier; absent when the page uses the Gateway WebSocket or `rpc` is present. */
@@ -128,6 +161,8 @@ export interface ConnectionHandle {
   readonly state: ConnectionStateSource
   /** Generic logical RPC channels over the same Connection transport. */
   readonly rpc: ClientConnectionRpc
+  /** Shell-owned physical socket factory; Remote retains its framing and recovery. */
+  readonly openMuxSocket?: ClientMuxSocketFactory
   /** Reset retry progression and replace the current attempt immediately. */
   reconnect(): void
   /**
@@ -246,6 +281,7 @@ export function apply(ctx: Context): void {
       },
     },
     rpc,
+    ...transport?.openMuxSocket === undefined ? {} : { openMuxSocket: transport.openMuxSocket },
     reconnect() {
       owner?.controller.reconnect()
     },

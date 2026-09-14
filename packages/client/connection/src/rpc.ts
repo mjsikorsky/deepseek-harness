@@ -101,6 +101,8 @@ export type ConnectionRpcHandler = (
   endpoint: string,
   payload: unknown,
   signal: AbortSignal,
+  /** Original authenticated HTTP carrier, absent for a direct trusted caller. */
+  request?: Request,
 ) => Promise<ConnectionRpcResult<unknown>>
 
 /** Synchronous ownership test for one endpoint on a shared RPC channel. */
@@ -248,4 +250,37 @@ export interface ClientConnectionRpc {
     payload: unknown,
     signal: AbortSignal,
   ) => AsyncIterable<unknown>
+}
+
+/** Immutable request facts available before a native raw handler runs. */
+export interface ConnectionRequestMetadata {
+  readonly method: string
+  readonly url: string
+  readonly headers: Readonly<Record<string, string>>
+  readonly signal: AbortSignal
+}
+
+/** One deployment-authorized HTTP request, including its input and output lifetime. */
+export interface ConnectionRequestLease {
+  /** Expiry, revocation, or policy withdrawal ends this request. */
+  readonly signal: AbortSignal
+  /**
+   * Recheck authority and run one handler or byte-stream advancement in its scope.
+   * Abort the lease when current authorization is withdrawn.
+   * @param dispatch - unchanged native work for this request.
+   * @returns native result; inherited invocation authority ends when this call settles.
+   */
+  run<T>(dispatch: () => Promise<T>): Promise<T>
+  /** Release request authority after both native body lifetimes finish. */
+  release(): void
+}
+
+/** Deployment policy shared by exact Fetch routes and all HTTP RPC channels. */
+export interface ConnectionRequestPolicy {
+  /**
+   * Verify request identity and authorize its resource before native dispatch.
+   * @param request - immutable method, URL, headers and cancellation, without parsing a body.
+   * @returns finite request lease, or undefined to deny without calling its handler.
+   */
+  admit(request: ConnectionRequestMetadata): Promise<ConnectionRequestLease | undefined>
 }

@@ -101,6 +101,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'agentLifecycleSetup',
+    summary: 'Deployment-owned setup composed with every caller\'s existing Agent setup.',
+    description: 'Deployment-owned setup composed with every caller\'s existing Agent setup.',
+    methods: [
+      {
+        signature: 'prepare(agentCtx: Context, agent: Agent): ReturnType<AgentSetup>',
+        description: 'Prepare authority and durable references while the Agent is unpublished. Preserve caller presets and tools. Register rollback through agentCtx. A returned commit executes after persistence settles, immediately before publication.',
+        parameters: [{ name: 'agentCtx', description: 'unpublished Agent scope owning prepared effects.' }, { name: 'agent', description: 'unpublished Agent being composed.' }],
+        returns: 'optional publication commit, after preparation finishes.',
+      },
+    ],
+  },
+  {
     key: 'agentLoop',
     summary: 'Concrete agent factory and driver service.',
     description: 'Concrete agent factory and driver service.',
@@ -1037,6 +1050,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Atomically edit literal text. When supplied, the version guard is checked before matching so stale content reports `FS_STALE_VERSION`; omission edits the current content without a freshness precondition.',
         parameters: [{ name: 'target', description: 'the resolved target to edit.' }, { name: 'edit', description: 'the literal search/replace request.' }, { name: 'expected', description: 'the version guard; omit for an unconditional edit.' }, { name: 'signal', description: 'aborts before atomic publication takes effect.' }, { name: 'sandboxPolicy', description: 'the per-call mode and workspace root this edit runs under; a sandboxing backend fences the edit by it, the bare backend ignores it. Omit to leave the backend its own default.' }],
         returns: 'the outcome, including the version the edit produced.',
+      },
+    ],
+  },
+  {
+    key: 'gatewayAccess',
+    summary: 'Trusted deployment provider; absence/denial is never a default identity.',
+    description: 'Trusted deployment provider; absence/denial is never a default identity.',
+    methods: [
+      {
+        signature: 'admit(request: GatewayCarrierRequest): Promise<GatewayAccessLease | undefined>',
+        description: 'Verify carrier authority and capture its independently expiring lifetime.',
+        parameters: [{ name: 'request', description: 'original request facts, including server-forwarded proof headers.' }],
+        returns: 'one owned lease, or undefined to deny the request.',
       },
     ],
   },
@@ -1994,6 +2020,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Register the sole optional title provider. Disposal aborts its pending and active work before another provider may register.',
         parameters: [{ name: 'provider', description: 'provider identity, cadence, and generation function.' }],
         returns: 'exact Cordis effect disposer, which settles after active calls quiesce.',
+      },
+    ],
+  },
+  {
+    key: 'sessionVisibility',
+    summary: 'Deployment-owned visibility before native list/search pagination.',
+    description: 'Deployment-owned visibility before native list/search pagination.',
+    methods: [
+      {
+        signature: 'canRead(sessionId: SessionId, signal?: AbortSignal): Promise<boolean>',
+        description: 'Check the current invocation\'s authority against this exact native Session.',
+        parameters: [{ name: 'sessionId', description: 'exact native Session identity.' }, { name: 'signal', description: 'caller cancellation.' }],
+        returns: 'whether this invocation may include the Session in its results.',
       },
     ],
   },
@@ -4289,6 +4328,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'FsWriteOutcome',
     declaration: 'export interface FsWriteOutcome {\n    operation: \'create\' | \'update\';\n    version: FsVersion;\n    before: string | null;\n    after: string;\n}',
+  },
+  {
+    name: 'GatewayAccessLease',
+    declaration: 'export interface GatewayAccessLease {\n    readonly signal: AbortSignal;\n    run<T>(operation: GatewayAccessOperation, dispatch: () => Promise<T>): Promise<T>;\n    check(operation: GatewayAccessOperation): Promise<void>;\n    project(operation: GatewayAccessOperation, value: unknown): Promise<{\n        readonly keep: true;\n        readonly value: unknown;\n    } | {\n        readonly keep: false;\n    }>;\n    release(): void;\n}',
+  },
+  {
+    name: 'GatewayAccessOperation',
+    declaration: 'export interface GatewayAccessOperation {\n    readonly endpoint: string;\n    readonly payload: unknown;\n}',
+  },
+  {
+    name: 'GatewayCarrierRequest',
+    declaration: 'export interface GatewayCarrierRequest {\n    readonly method?: string | undefined;\n    readonly url?: string | undefined;\n    readonly headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>;\n}',
   },
   {
     name: 'GenerateOptions',

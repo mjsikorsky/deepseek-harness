@@ -25,6 +25,8 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
+Every Agent creation path, including direct configured Agents, composes `ctx.agentLifecycleSetup` with caller setup before publication. Preparation runs while the Agent is unpublished; durable seed appends settle before both synchronous commits. A rejected commit prevents registry publication and creation events. Scope disposal unwinds prepared effects; durable writes require reconciliation by their owner and are not a cross-service transaction.
+
 Mount `dsh-agent-loop` in any composition that should run agents. It supplies the driver behind `ctx.agents` and starts any agents you declare in its config; both [`dsh-base`](../../bundle/base/README.md) and [`dsh-sdk-minimal`](../../bundle/sdk-minimal/README.md) mount it as an explicit row.
 
 ### Configure declarative agents

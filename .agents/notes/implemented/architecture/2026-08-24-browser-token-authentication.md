@@ -4,6 +4,8 @@ Status: implemented
 
 English | [中文](2026-08-24-browser-token-authentication.zh.md)
 
+The [deployment access decision](2026-09-13-deployment-access-and-agent-publication.md) partially supersedes the complete-Host-authority consequence for compositions that require additional Gateway or Connection request providers. Connection browser authentication remains required; possession of that cookie alone does not satisfy the installed deployment policy. Standalone behavior remains unchanged.
+
 ## Problem
 
 The Web Host runs tool-capable Sessions with the current operating-system user's authority, but its HTTP interface identified privileged callers from request routing facts. In particular, the method-specific loopback list treated a loopback `Host` value as local authority even though an HTTP client controls that header. A caller that could reach the server could therefore name `localhost`, enter configuration methods, and use Host-side operations such as model discovery to disclose stored credentials. Binding the shipped CLI to loopback limits ordinary reachability but does not authenticate a request forwarded or otherwise delivered to that socket.

@@ -4,6 +4,8 @@ Status: implemented
 
 [English](2026-08-24-browser-token-authentication.md) | 中文
 
+[部署访问决策](2026-09-13-deployment-access-and-agent-publication.zh.md) 部分取代了需要额外 Gateway 或 Connection 请求提供者的组合中关于完整 Host 权限的结论。Connection 浏览器认证仍然必需；仅持有该 Cookie 并不能满足已安装的部署策略。独立运行的行为保持不变。
+
 ## 问题
 
 Web Host 以当前操作系统用户的权限运行具有工具能力的 Session，但其 HTTP 接口用请求路由事实识别特权调用者。具体而言，按方法维护的 loopback 列表把 loopback `Host` 值视为本地 authority，尽管 HTTP 客户端可以控制该 header。能够到达服务器的调用者因此可以声明 `localhost`、进入配置方法，再利用模型发现等 Host 侧操作披露存储的凭据。随附 CLI 绑定 loopback 可以限制普通可达性，却不能认证被转发或以其他方式送达该 socket 的请求。

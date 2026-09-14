@@ -12,6 +12,8 @@ We recommend using an agent to explore the codebase and understand its architect
 
 There is no privileged core to patch: you extend dsh by mounting a plugin beside the others, and registrations are effects that unwind when their plugin unloads.
 
+Shared-host deployments use [Gateway](../packages/api/gateway/README.md) admission and delivery leases, [SessionController](../packages/api/session-controller/README.md) visibility before pagination, and [AgentLoop](../packages/core/agent-loop/README.md) preparation and commits before publication. Deployment plugins own identity, workspace binding and durable authorization; native transport, presets and tools retain their owners.
+
 ## Profiles and bundles
 
 A running `dsh` is a plugin tree composed at boot from ordered layers.

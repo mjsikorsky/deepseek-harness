@@ -697,23 +697,17 @@ export class AgentLoop extends Service implements AgentFactory {
    * @returns the published running agent.
    */
   async create(id: SessionId, options: AgentOptions = {}, meta: Pick<SessionHeader, 'cwd'> = {}): Promise<Agent> {
-    using preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, { meta }))
-    const stored = await this.createStoredSession(preparation.session)
-    let prepared: PreparedAgent
+    const preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, { meta }))
+    let stored: StoredSession | undefined
     try {
-      prepared = this.prepare(this.ctx, id, options, preparation.session, undefined, stored?.handle)
+      stored = await this.createStoredSession(preparation.session)
     } catch (error: unknown) {
-      await stored?.handle.close().catch(() => {})
+      preparation[Symbol.dispose]()
       throw error
     }
-    try {
-      await this.appendUnstoredSuffix(stored, preparation.session)
-      return prepared.publish('startup').agent
-    } catch (error: unknown) {
-      // Rollback swallows a disposal rejection: the setup failure is primary.
-      void prepared.dispose().catch(() => {})
-      throw error
-    }
+    return (await this.setupAndPublish(
+      this.ctx, id, preparation, options, undefined, undefined, 'startup', stored,
+    )).agent
   }
 
   /**
@@ -824,8 +818,16 @@ export class AgentLoop extends Service implements AgentFactory {
     }
     try {
       const setupCommit = await raceAbort(setup?.(prepared.agent.ctx, prepared.agent), prepared.signal, id)
-      setupCommit?.commit()
+      // A deployment provider composes with every native caller, including
+      // plugins/subagents. It does not replace the caller's preset or setup.
+      const lifecycle = ownerCtx.get('agentLifecycleSetup')
+      const lifecycleCommit = await raceAbort(
+        lifecycle?.prepare(prepared.agent.ctx, prepared.agent), prepared.signal, id,
+      )
       await this.appendUnstoredSuffix(stored, session)
+      // No awaited persistence may separate authority validation from publication.
+      setupCommit?.commit()
+      lifecycleCommit?.commit()
       return prepared.publish(source)
     } catch (error: unknown) {
       // Rollback swallows a disposal rejection (a failing final handle close):

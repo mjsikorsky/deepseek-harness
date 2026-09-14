@@ -99,6 +99,30 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'agentLifecycleSetup',
+    pkg: 'agent',
+    title: 'Deployment Agent publication authority',
+    mode: 'seam',
+    consumers: ['agent-loop'],
+    note: 'Deployment providers prepare an unpublished Agent alongside caller setup and commit after durable appends, immediately before native publication.',
+  },
+  {
+    key: 'gatewayAccess',
+    pkg: 'api-gateway',
+    title: 'Deployment Remote carrier admission',
+    mode: 'seam',
+    consumers: ['api-gateway'],
+    note: 'Deployment providers admit finite carrier leases and authorize native dispatch and delivery without replacing RPC or mux framing.',
+  },
+  {
+    key: 'sessionVisibility',
+    pkg: 'api-session-controller',
+    title: 'Session collection read authorization',
+    mode: 'seam',
+    consumers: ['api-session-controller'],
+    note: 'Deployment providers filter native Session identities before list collection and search pagination.',
+  },
+  {
     key: 'attachments',
     pkg: 'attachment',
     title: 'Durable binary attachment storage',

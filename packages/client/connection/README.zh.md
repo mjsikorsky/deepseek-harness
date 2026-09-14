@@ -25,12 +25,16 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+`ClientTransportHooks.openMuxSocket` 同步或在异步准入后向原生 Gateway mux 提供物理 `ClientMuxSocket`。工厂接收目标 URL 和尝试取消信号。原生 Gateway 保留所有逻辑流帧协议及重试，关闭迟到的工厂返回值，并在套接字丢失时结束信号。这个逐页面钩子可以与 `fetch` 组合；`rpc` 或 `openStream` 仍选择完整的逻辑传输。
+
 浏览器通过 HTTP POST 执行 Remote 一元调用；API Gateway 自己拥有 `/api/remote.mux` WebSocket 及其逻辑流。由 shell 持有的组合通过 `connection.rpc.open` 提供等价的 Remote 流，不打开 WebSocket。Host half 始终提供与载体无关的 RPC 注册表和精确 `GET`/`HEAD`/`POST` 路由注册表。存在 Web 载体时，它还持有唯一 `/api` route、Fetch bridge、浏览器认证与 Host/Origin 校验；由 shell 持有的载体则直接分派共享 Fetch handler。每条精确路由会在 bridge 读取任何字节前声明缓冲或流式请求体处理方式。Typert Gateway 认领生成的 Remote endpoint，功能包注册 Session 日志下载、原始文件上传等非 JSON 响应，未认领的请求返回 404。Loopback hostname 判定只供浏览器侧当前页面状态使用，留在包内。浏览器原始请求体传输由 [`dsh-client-file-upload`](../file-upload/README.zh.md) 提供。
 
 -----
 
 <a id="browser-authentication-and-request-trust"></a>
 ## 浏览器认证与请求信任
+
+部署主机可设置 `requireRequestPolicy: true` 并提供 `ctx.connectionRequestPolicy`。`admit` 接收不可变的方法、URL、请求头和取消信号，返回有限期的 `ConnectionRequestLease`。每个精确 Fetch 路由、共享 HTTP 拦截器和自定义 HTTP RPC 通道都必须在处理器执行前经过该接口，不存在注册豁免。原生输入与输出流的读取在租约内执行。撤销或提供者销毁会拒绝等待中的读取、取消源并释放权限，即使处理器或源忽略取消。现有缓冲桥接仍在分派前执行请求体大小限制。Gateway 使用同一部署权限继续进行更细的操作和事件授权。单独注册的 WebServer 路由和 WebSocket 升级仍由各自所有者负责。
 
 每个 Host RPC 方法和 WebSocket 流都要求一个浏览器会话，不存在按方法区分的 loopback 层。每个进程生成一个随机启动令牌。`dsh-web-app` 打印并打开带 `?token=...` 的普通根 URL；`frontend-static` 把根路径和 index 请求交给 `ctx.connection.authorizeIndex`，后者只在 `GET /` 接受该令牌，写入绑定 authority 的签名 cookie，再重定向到干净的 `/`。缺失、过期、畸形或 authority 不匹配的 cookie 会在 RPC 分发前得到 401。静态资源保持公开。HTTP 载体不在根路径交换之外接受 query token，也不接受 Authorization header token。
 

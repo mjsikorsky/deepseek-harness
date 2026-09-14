@@ -4,6 +4,8 @@ Status: implemented
 
 English | [中文](2026-08-10-remote-event-delivery.zh.md)
 
+The [deployment access decision](2026-09-13-deployment-access-and-agent-publication.md) partially supersedes unconditional verbatim delivery: an installed Gateway access provider may project or suppress an event for its admitted carrier. The original event source, codecs, mux and waterfall outcome protocol remain the owners; no provider means the original delivery behavior.
+
 ## Problem
 
 [Typert Remote method calls](../../implemented/architecture/2026-08-02-typert-remote-method-calls.md) initially cover targeted calls with one result per request and deliberately leave Session streams and stateful interactions elsewhere. Host-to-consumer events need a delivery mechanism that is not owned by the API Proxy domain.

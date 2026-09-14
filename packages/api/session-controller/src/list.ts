@@ -130,6 +130,7 @@ export class ApiSessionList {
     const items: SessionSummary[] = []
     const cold: SessionHeader[] = []
     for (const record of records) {
+      if (!await this.canRead(record.header.id, signal)) continue
       const live = this.ctx.sessions.get(record.header.id)
       if (live !== undefined) {
         items.push(this.summaryFor(live))
@@ -177,9 +178,10 @@ export class ApiSessionList {
     try {
       const visible = await provider.listSessions(signal)
       signal.throwIfAborted()
-      const visibleIds = new Set(visible
-        .filter(record => record.header.cwd !== undefined)
-        .map(record => record.header.id))
+      const visibleIds = new Set<SessionId>()
+      for (const record of visible) {
+        if (record.header.cwd !== undefined && await this.canRead(record.header.id, signal)) visibleIds.add(record.header.id)
+      }
       if (visibleIds.size === 0) return { items: [], hasMore: false }
       const authorized: SessionSearchItem[] = []
       const acceptedIds = new Set<SessionId>()
@@ -263,6 +265,14 @@ export class ApiSessionList {
       }
       throw new RemoteError('gateway/internal', `session search failed: ${String(error)}`, {})
     }
+  }
+
+  private async canRead(sessionId: SessionId, signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted()
+    const owner = this.ctx.get('sessionVisibility')
+    const allowed = owner === undefined || await owner.canRead(sessionId, signal)
+    signal?.throwIfAborted()
+    return allowed
   }
 
   private projectionsFor(

@@ -6,6 +6,8 @@
 
 源码：[`packages/core/session/src/types.ts`](../../packages/core/session/src/types.ts)
 
+已安装在 `ctx.sessionVisibility` 的 `SessionVisibility` 提供者会使用调用者的取消信号，在原生列表收集和搜索分页前检查 Session 身份。部署还必须在 Gateway 边界授权直接读取和修改；此集合钩子保留原生结果数量，不会替换历史或持久化。
+
 ## `SessionEventMap`：事件词汇
 
 仅追加的事件类型。可通过声明合并扩展：插件通过 declaration merging 声明额外的事件类型。例如[压缩（compaction） seam](compaction.zh.md) 添加了 `compaction/start` / `compaction/summary` / `compaction/end`，`@deepseek-ai/dsh-hook-protocol` 为钩子桥接添加了仅记录日志的 `hook/invoked` / `hook/result` 记录。与 `compaction/*` 一样，这些都不是 `SurfaceEventType`（没有 `surfaceOp`）。生成的[持久化日志事件目录](../persistence-catalog.zh.md)列举了所有成员（核心与合并扩展的），包含其 payload、surface 标记与声明位置。
@@ -985,6 +987,26 @@ fork(source: SessionForkSource, boundary?: SessionSeq, childSessionId?: SessionI
 Types: [CreateSessionOptions](persistence.zh.md) · [PrepareSessionOptions](persistence.zh.md) · [SessionId](core.zh.md)
 
 Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/index.ts)
+
+<a id="ctxsessionvisibility--sessionvisibility"></a>
+
+### `ctx.sessionVisibility` — `SessionVisibility`
+
+Deployment-owned visibility before native list/search pagination.
+
+```ts cordis-catalog
+/**
+ * Check the current invocation's authority against this exact native Session.
+ * @param sessionId - exact native Session identity.
+ * @param signal - caller cancellation.
+ * @returns whether this invocation may include the Session in its results.
+ */
+canRead(sessionId: SessionId, signal?: AbortSignal): Promise<boolean>
+```
+
+Types: [SessionId](core.zh.md)
+
+Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/session-controller/src/types.ts)
 
 <a id="api-session-events"></a>
 

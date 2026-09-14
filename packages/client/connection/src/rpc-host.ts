@@ -11,8 +11,10 @@ import { clientRequestSchema } from './rpc-schema.ts'
 import { bridge } from './http-bridge.ts'
 import { isTrustedApiRequest } from './api-request-trust.ts'
 import { API_PATH } from './api-path.ts'
+import { dispatchWithRequestPolicy } from './request-policy.ts'
 import type { BrowserAuth } from './browser-auth.ts'
 import type {
+  ConnectionRequestPolicy,
   ConnectionIndexRequest,
   ConnectionIndexResponse,
   ConnectionFetchRoute,
@@ -51,6 +53,8 @@ interface ConnectionServerResponse {
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
+    /** Deployment request authority for native HTTP dispatch and body delivery. */
+    connectionRequestPolicy: ConnectionRequestPolicy
     /** Host Connection transport and RPC registrations. */
     connection: HostConnectionHandle
   }
@@ -60,19 +64,27 @@ declare module '@deepseek-ai/cordis' {
 export class HostConnectionService extends Service implements HostConnectionHandle {
   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
   private readonly fetchRoutes = new Map<string, RegisteredFetchRoute>()
+  private readonly requestLifetime = new AbortController()
+  private readonly pendingRequests = new Set<Promise<void>>()
 
   /**
    * Provide the Host half over the active HTTP server.
    * @param ctx - owning Connection plugin context.
    * @param trustedHosts - deployment authorities accepted by the Host/Origin fence.
    * @param browserAuth - process token and persistent browser-session owner.
+   * @param requireRequestPolicy - deny HTTP requests without deployment request authority.
    */
   constructor(
     ctx: Context,
     private readonly trustedHosts: readonly string[],
     private readonly browserAuth: BrowserAuth,
+    private readonly requireRequestPolicy = false,
   ) {
     super(ctx, 'connection')
+    ctx.effect(() => async () => {
+      this.requestLifetime.abort(new Error('Connection disposed'))
+      await Promise.allSettled([...this.pendingRequests])
+    }, 'client-connection: deployment request lifetimes')
   }
 
   /** Generic channel registry scoped to the Context reading this service. */
@@ -122,7 +134,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
         const route = this.fetchRoutes.get(url.pathname)
         return route?.methods.has(method) === true ? route.requestBody : 'buffered'
       },
-      fetch: (request) => {
+      fetch: request => this.authorizedFetch(request, async (request) => {
         const pathname = new URL(request.url).pathname
         const route = this.fetchRoutes.get(pathname)
         if (route?.methods.has(request.method) === true) return route.fetch(request)
@@ -132,8 +144,18 @@ export class HostConnectionService extends Service implements HostConnectionHand
           return Promise.resolve(new Response('not found', { status: 404 }))
         }
         return interceptor.fetchHandler.fetch(request)
-      },
+      }),
     }
+  }
+
+  private authorizedFetch(request: Request, dispatch: (request: Request) => Promise<Response>): Promise<Response> {
+    return dispatchWithRequestPolicy(
+      request, this.ctx.get('connectionRequestPolicy'), this.requireRequestPolicy,
+      this.requestLifetime.signal, (done) => {
+        this.pendingRequests.add(done)
+        void done.then(() => { this.pendingRequests.delete(done) })
+      }, dispatch,
+    )
   }
 
   private registerFetchRoute(
@@ -161,7 +183,11 @@ export class HostConnectionService extends Service implements HostConnectionHand
     handler: ConnectionRpcHandler,
   ): () => Promise<void> {
     assertChannel(channel)
-    const fetchHandler = rpcFetchHandler(channel, handler)
+    const nativeHandler = rpcFetchHandler(channel, handler)
+    const fetchHandler: ConnectionFetchHandler = {
+      requestBodyMode: request => nativeHandler.requestBodyMode(request),
+      fetch: request => this.authorizedFetch(request, scoped => nativeHandler.fetch(scoped)),
+    }
     const route: WebRoute = {
       kind: 'prefix',
       path: channel,
@@ -244,7 +270,7 @@ function rpcFetchHandler(
       }
 
       try {
-        const result = await handler(endpoint, message.payload, request.signal)
+        const result = await handler(endpoint, message.payload, request.signal, request)
         return fullResponse(message.rpcId, result)
       } catch (error) {
         return new Response(`handler failure: ${String(error)}`, { status: 500 })

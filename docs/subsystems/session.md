@@ -6,6 +6,8 @@ The in-memory, event-sourced model of [dsh-session](../../packages/core/session)
 
 Source: [`packages/core/session/src/types.ts`](../../packages/core/session/src/types.ts)
 
+An installed `SessionVisibility` provider at `ctx.sessionVisibility` checks Session identities before native list collection and search pagination, using the caller’s cancellation signal. A deployment must also authorize direct reads and mutations at its Gateway boundary; this collection hook preserves native result counts and does not replace history or persistence.
+
 ## `SessionEventMap` — the event vocabulary
 
 The append-only event types. Merge-extensible: a plugin declares extra event types via declaration merging — e.g. the [compaction seam](compaction.md) adds `compaction/start` / `compaction/summary` / `compaction/end`, and `@deepseek-ai/dsh-hook-protocol` adds log-only `hook/invoked` / `hook/result` records for a hook bridge. Like `compaction/*`, these are NOT `SurfaceEventType`s (no `surfaceOp`). The generated [persistence log event catalog](../persistence-catalog.md) enumerates every member — core and merged — with its payload, surface badge, and declaration site.
@@ -981,6 +983,26 @@ fork(source: SessionForkSource, boundary?: SessionSeq, childSessionId?: SessionI
 Types: [CreateSessionOptions](persistence.md) · [PrepareSessionOptions](persistence.md) · [SessionId](core.md)
 
 Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/index.ts)
+
+<a id="ctxsessionvisibility--sessionvisibility"></a>
+
+### `ctx.sessionVisibility` — `SessionVisibility`
+
+Deployment-owned visibility before native list/search pagination.
+
+```ts cordis-catalog
+/**
+ * Check the current invocation's authority against this exact native Session.
+ * @param sessionId - exact native Session identity.
+ * @param signal - caller cancellation.
+ * @returns whether this invocation may include the Session in its results.
+ */
+canRead(sessionId: SessionId, signal?: AbortSignal): Promise<boolean>
+```
+
+Types: [SessionId](core.md)
+
+Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/session-controller/src/types.ts)
 
 <a id="api-session-events"></a>
 

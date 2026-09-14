@@ -25,6 +25,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+所有 Agent 创建路径（包括直接配置的 Agent）都会在发布之前将 `ctx.agentLifecycleSetup` 与调用者的设置组合。准备阶段在 Agent 尚未发布时运行；持久种子追加完成后才执行两个同步提交。提交被拒绝时，不会发布到注册表或发出创建事件。作用域释放会撤销已准备的效果；持久写入需要其所有者进行协调，并不构成跨服务事务。
+
 在任何应运行 agent 的组合中挂载 `dsh-agent-loop`。它提供 `ctx.agents` 背后的驱动器，并启动你在配置中声明的 agent；[`dsh-base`](../../bundle/base/README.zh.md) 与 [`dsh-sdk-minimal`](../../bundle/sdk-minimal/README.zh.md) 都将它作为显式配置行挂载。
 
 ### 配置声明式 agent

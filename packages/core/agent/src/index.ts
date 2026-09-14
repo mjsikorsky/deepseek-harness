@@ -26,6 +26,7 @@ export type { AgentEventDispatch, AgentSubjectEvent } from './dispatch.ts'
 declare module '@deepseek-ai/cordis' {
   interface Context {
     agents: AgentRegistry
+    agentLifecycleSetup: AgentLifecycleSetup
   }
 }
 
@@ -51,6 +52,19 @@ export type AgentSetup = (
   agentCtx: Context,
   agent: Agent,
 ) => AgentSetupCommit | Promise<AgentSetupCommit | void> | void
+
+/** Deployment-owned setup composed with every caller's existing Agent setup. */
+export interface AgentLifecycleSetup {
+  /**
+   * Prepare authority and durable references while the Agent is unpublished.
+   * Preserve caller presets and tools. Register rollback through agentCtx.
+   * A returned commit executes after persistence settles, immediately before publication.
+   * @param agentCtx - unpublished Agent scope owning prepared effects.
+   * @param agent - unpublished Agent being composed.
+   * @returns optional publication commit, after preparation finishes.
+   */
+  prepare(agentCtx: Context, agent: Agent): ReturnType<AgentSetup>
+}
 
 /**
  * Options for programmatically creating an agent through the registry factory

@@ -4,6 +4,8 @@ English | [中文](core.zh.md)
 
 The **core** subsystem is [`packages/core`](../../packages/core/README.md) — the packages every composition boots: the event-sourced session log, system-prompt assembly, the tool registry, the agent types, and the concrete loop that drives them. This page explains what the `agent`/`agent-loop` pair declares — how an agent is created and owned, and the `Agent` handle's delivery, cancellation, and interception contracts — plus the two type patterns every subsystem follows. The group's dedicated pages and the rest of the folder are indexed in the [subsystems README](README.md).
 
+An installed `ctx.agentLifecycleSetup` provider composes `AgentLifecycleSetup.prepare()` with caller `AgentSetup`, preserving presets and scoped tools. AgentLoop awaits durable seed appends before synchronous caller and deployment commits, then publishes without another await. Provider rejection prevents creation events and registry visibility; durable preparation remains its owner’s reconciliation responsibility.
+
 ## The spine, package by package
 
 A turn flows through the six packages in one loop: the driver in [`agent-loop`](../../packages/core/agent-loop) claims a queued prompt, opens a turn on the [session log](session.md) (`ctx.sessions`), assembles the request prefix through [system-prompt](system-prompt.md) (`ctx.systemPrompt`) and derives history from the log, streams the model response through the [LLM seam](llm-streaming.md), dispatches tool calls through the [tool registry](tools.md) (`ctx.tools`), and appends every model-visible fact back onto the log before the next step derives from it. The conversation vocabulary the loop moves — `Message`, `ContentBlock`, `StreamChunk`, the model request — is declared by [`packages/llm`](../../packages/llm/README.md) and documented on [llm-streaming.md](llm-streaming.md).
@@ -440,6 +442,26 @@ async saveSelection(next: ModelSelection): Promise<void>
 ```
 
 Source: [`packages/core/agent-default-model/src/index.ts`](../../packages/core/agent-default-model/src/index.ts)
+
+<a id="ctxagentlifecyclesetup--agentlifecyclesetup"></a>
+
+### `ctx.agentLifecycleSetup` — `AgentLifecycleSetup`
+
+Deployment-owned setup composed with every caller's existing Agent setup.
+
+```ts cordis-catalog
+/**
+ * Prepare authority and durable references while the Agent is unpublished.
+ * Preserve caller presets and tools. Register rollback through agentCtx.
+ * A returned commit executes after persistence settles, immediately before publication.
+ * @param agentCtx - unpublished Agent scope owning prepared effects.
+ * @param agent - unpublished Agent being composed.
+ * @returns optional publication commit, after preparation finishes.
+ */
+prepare(agentCtx: Context, agent: Agent): ReturnType<AgentSetup>
+```
+
+Source: [`packages/core/agent/src/index.ts`](../../packages/core/agent/src/index.ts)
 
 <a id="ctxagentloop--agentloop"></a>
 

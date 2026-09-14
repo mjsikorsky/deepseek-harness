@@ -24,6 +24,9 @@ import {
 } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   InvokeRemoteRequest,
+  GatewayCarrierRequest,
+  GatewayAccessLease,
+  GatewayAccessOperation,
   TypertGateway,
   TypertGatewayErrorCode,
   TypertGatewayWireStream,
@@ -59,6 +62,10 @@ import {
 
 export type {
   InvokeRemoteRequest,
+  GatewayCarrierRequest,
+  GatewayAccessLease,
+  GatewayAccessProvider,
+  GatewayAccessOperation,
   TypertGateway,
   TypertGatewayErrorCode,
   TypertGatewayWireStream,
@@ -106,6 +113,7 @@ interface PendingRemoteEvent {
   readonly source: TypertRemoteEventInvocation
   readonly frame: RemoteEventInvocationFrame
   readonly deliveries: Set<RemoteEventClient>
+  delegated: boolean
   releaseContext: () => void
   releaseSignal: () => void
 }
@@ -117,6 +125,8 @@ const DEFAULT_WEBSOCKET_HEARTBEAT_INTERVAL_MS = 2_000
 
 /** Gateway transport configuration. */
 export interface Config {
+  /** Require a deployment access provider on every browser HTTP/WS operation. */
+  readonly requireAccessPolicy?: boolean
   /** WebSocket Ping interval from 1 through 2,147,483,647 milliseconds. @default 2000 */
   readonly websocketHeartbeatIntervalMs?: number
 }
@@ -169,6 +179,7 @@ export class TypertGatewayError extends RemoteError<TypertGatewayErrorCode> {
 export class TypertGatewayService extends Service implements TypertGateway {
   static inject = ['typert']
   static Config: z<Config> = z.object({
+    requireAccessPolicy: z.boolean().default(false),
     websocketHeartbeatIntervalMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS)
       .default(DEFAULT_WEBSOCKET_HEARTBEAT_INTERVAL_MS),
   })
@@ -184,6 +195,8 @@ export class TypertGatewayService extends Service implements TypertGateway {
   private readonly remoteEventClients = new Map<RemoteEventClientId, RemoteEventClient>()
   private readonly pendingRemoteEvents = new Map<RemoteEventId, PendingRemoteEvent>()
 
+  private readonly requireAccessPolicy: boolean
+
   /**
    * Register the Gateway against the active Typert registry.
    * @param ctx - owning Host Context with Typert registry access.
@@ -191,6 +204,7 @@ export class TypertGatewayService extends Service implements TypertGateway {
    */
   constructor(ctx: Context, config: Config) {
     super(ctx, 'typertGateway')
+    this.requireAccessPolicy = config.requireAccessPolicy === true
     const resolved = config as ResolvedConfig
     ctx.on('internal/service', () => {
       this.srcClaims = undefined
@@ -199,7 +213,7 @@ export class TypertGatewayService extends Service implements TypertGateway {
       connectionCtx.connection.rpc.intercept(
         '/api',
         endpoint => this.claimsEndpoint(endpoint),
-        (endpoint, payload, signal) => this.dispatchRpc(endpoint, payload, signal),
+        (endpoint, payload, signal, request) => this.dispatchBrowserRpc(endpoint, payload, signal, request),
       )
     })
     ctx.inject(['connection', 'webServer'], (webCtx) => {
@@ -211,13 +225,33 @@ export class TypertGatewayService extends Service implements TypertGateway {
       webCtx.effect(() => {
         const route: WebUpgradeRoute = {
           path: REMOTE_STREAM_MUX_PATH,
-          handler: (req, socket, head) => {
+          handler: async (req, socket, head) => {
             const rejection = webCtx.connection.requestRejection(req)
             if (rejection !== undefined) {
               rejectRemoteStreamUpgrade(socket, rejection)
               return
             }
-            mux.handleUpgrade(req, socket, head)
+            let access: GatewayAccessLease | undefined
+            try { access = await this.admitCarrier(req) }
+            catch { rejectRemoteStreamUpgrade(socket, 403); return }
+            if (socket.destroyed) { access?.release(); return }
+            if (access === undefined) { mux.handleUpgrade(req, socket, head); return }
+            const captured = access
+            const abort = (): void => { socket.destroy() }
+            let released = false
+            const release = (): void => {
+              if (released) return
+              released = true
+              captured.signal.removeEventListener('abort', abort)
+              captured.release()
+            }
+            socket.once('close', release)
+            captured.signal.addEventListener('abort', abort, { once: true })
+            if (captured.signal.aborted) { abort(); release(); return }
+            try {
+              mux.handleUpgrade(req, socket, head, (endpoint, payload, signal) =>
+                this.openAuthorizedStream(captured, endpoint, payload, signal))
+            } catch (error) { release(); throw error }
           },
         }
         const unregister = webCtx.webServer.registerUpgrade(route)
@@ -347,6 +381,86 @@ export class TypertGatewayService extends Service implements TypertGateway {
       prepared.endpoint,
       request.signal ?? NEVER_ABORTED_SIGNAL,
     )
+  }
+
+  private async admitCarrier(request: GatewayCarrierRequest | undefined): Promise<GatewayAccessLease | undefined> {
+    const provider = this.ctx.get('gatewayAccess')
+    if (provider === undefined && !this.requireAccessPolicy) return undefined
+    if (provider === undefined || request === undefined) throw new Error('Gateway access is required')
+    const lease = await provider.admit(request)
+    if (lease === undefined) throw new Error('Gateway access denied')
+    if (lease.signal.aborted) { lease.release(); throw new Error('Gateway access ended') }
+    return lease
+  }
+
+  private async dispatchBrowserRpc(
+    endpoint: string, payload: unknown, signal: AbortSignal, request?: Request,
+  ): Promise<ConnectionRpcResult> {
+    let access: GatewayAccessLease | undefined
+    try {
+      access = await this.admitCarrier(request)
+      if (access === undefined) return await this.dispatchRpc(endpoint, payload, signal)
+      const operation = { endpoint, payload }
+      const lifetime = AbortSignal.any([signal, access.signal])
+      lifetime.throwIfAborted()
+      await access.check(operation)
+      lifetime.throwIfAborted()
+      const result = await access.run(operation, () => this.dispatchRpc(endpoint, payload, lifetime))
+      lifetime.throwIfAborted()
+      if (!result.ok) return result
+      const projected = await access.project(operation, result.value)
+      lifetime.throwIfAborted()
+      if (!projected.keep) throw new Error('Gateway result is not authorized')
+      return { ok: true, value: projected.value }
+    } catch (error) { return rpcFailure(error) }
+    finally { access?.release() }
+  }
+
+  private async openAuthorizedStream(
+    access: GatewayAccessLease, endpoint: string, payload: unknown, signal: AbortSignal,
+  ): Promise<AsyncIterable<unknown>> {
+    const operation = { endpoint, payload }
+    const lifetime = AbortSignal.any([signal, access.signal])
+    lifetime.throwIfAborted()
+    await access.check(operation)
+    lifetime.throwIfAborted()
+    const source = await access.run(operation, () => this.openWireStream(endpoint, payload, lifetime))
+    return this.projectAuthorizedStream(access, operation, source, lifetime)
+  }
+
+  private async *projectAuthorizedStream(
+    access: GatewayAccessLease, operation: GatewayAccessOperation, source: AsyncIterable<unknown>, signal: AbortSignal,
+  ): AsyncGenerator {
+    let eventClientId: RemoteEventClientId | undefined
+    const iterator = source[Symbol.asyncIterator]()
+    const scopedSource = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => access.run(operation, () => iterator.next()),
+        // Cleanup must remain possible after the access scope expires.
+        return: () => iterator.return?.() ?? Promise.resolve({ done: true as const, value: undefined }),
+      }),
+    }
+    try {
+      for await (const value of scopedSource) {
+        signal.throwIfAborted()
+        if (operation.endpoint === REMOTE_EVENT_STREAM_ENDPOINT && typeof value === 'object' && value !== null && 'type' in value && value.type === 'ready' && 'clientId' in value) {
+          eventClientId = value.clientId as RemoteEventClientId
+        }
+        const projected = await access.project(operation, value)
+        signal.throwIfAborted()
+        if (projected.keep) yield projected.value
+        else if (eventClientId !== undefined && typeof value === 'object' && value !== null && 'type' in value && value.type === 'waterfall' && 'eventId' in value) {
+          // A policy-hidden invocation was never delivered to this browser. Do
+          // not leave it counted as an outstanding recipient of a native waterfall.
+          const client = this.remoteEventClients.get(eventClientId)
+          const pending = this.pendingRemoteEvents.get(value.eventId as RemoteEventId)
+          if (client !== undefined && pending !== undefined) {
+            this.removeRemoteEventDelivery(pending, client)
+            if (pending.delegated && pending.deliveries.size === 0) this.settleRemoteEvent(pending, { kind: 'next' })
+          }
+        }
+      }
+    } finally { await iterator.return?.() }
   }
 
   private async dispatchRpc(
@@ -499,6 +613,7 @@ export class TypertGatewayService extends Service implements TypertGateway {
           request: projected.request,
         },
         deliveries: new Set(),
+        delegated: false,
         releaseContext,
         releaseSignal: () => {
           for (const signal of signals) signal.removeEventListener('abort', abort)
@@ -535,8 +650,9 @@ export class TypertGatewayService extends Service implements TypertGateway {
       })
     } else if (result.outcome.kind === 'rejected') {
       this.cancelRemoteEvent(pending, restoreRemoteEventRejection(result.outcome.error))
-    } else if (pending.deliveries.size === 0) {
-      this.settleRemoteEvent(pending, { kind: 'next' })
+    } else {
+      pending.delegated = true
+      if (pending.deliveries.size === 0) this.settleRemoteEvent(pending, { kind: 'next' })
     }
   }
 
@@ -547,7 +663,10 @@ export class TypertGatewayService extends Service implements TypertGateway {
 
   private removeRemoteEventClient(client: RemoteEventClient): void {
     this.remoteEventClients.delete(client.id)
-    for (const pending of [...client.deliveries.values()]) this.removeRemoteEventDelivery(pending, client)
+    for (const pending of [...client.deliveries.values()]) {
+      this.removeRemoteEventDelivery(pending, client)
+      if (pending.delegated && pending.deliveries.size === 0) this.settleRemoteEvent(pending, { kind: 'next' })
+    }
     client.queue.end()
   }
 

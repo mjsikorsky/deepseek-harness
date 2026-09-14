@@ -24,6 +24,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+已安装的 `ctx.sessionVisibility` 提供者会在原生列表收集和搜索分页之前过滤 Session 身份。当不可访问的匹配项排在可读 Session 之前时，这能保留结果数量限制。提供者接收请求取消信号，并负责当前读取授权；它不会替换原生历史、搜索或 Session 生命周期行为。直接 Session 操作仍由部署访问提供者负责。
+
 历史页与 follow opening 快照为每个持久 Session 事件携带一条 `{ type: 'event', event: SessionWireEvent }` record。Client 把每条已接受 record 保留为一个持久 `SessionEventLikeEntry`；Assistant token 边界保留在 `assistant/message` 或 `assistant/attempt` 的紧凑流内。工具参数、结果内容、失败信息和 `tool/result.data.meta` 原样通过；控制器不解析工具定义、不运行展示转换器，也不附加 UI 数据。
 
 Client journal 在发布 follow 快照、live entry 或历史页之前验证精确的 V3 事件 envelope。它复用浏览器安全的 Session validator，检查必需的 surface marker、精确的 replacement endpoint、更早且唯一的 source seq、内嵌 Assistant 来源、request header 可选字段的省略规则以及工具错误一致性。无效 record 直接失败，不删除字段或归一化；范围成员与来源存在性仍由 Host 的持久日志检查。

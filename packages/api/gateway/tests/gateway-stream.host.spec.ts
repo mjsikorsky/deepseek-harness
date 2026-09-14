@@ -219,9 +219,9 @@ afterEach(async () => {
 
 describe('Typert Remote streams', () => {
   it('validates the WebSocket heartbeat timer range', () => {
-    expect(TypertGatewayService.Config({})).toEqual({ websocketHeartbeatIntervalMs: 2_000 })
+    expect(TypertGatewayService.Config({})).toEqual({ requireAccessPolicy: false, websocketHeartbeatIntervalMs: 2_000 })
     expect(TypertGatewayService.Config({ websocketHeartbeatIntervalMs: MAX_TIMER_DELAY_MS }))
-      .toEqual({ websocketHeartbeatIntervalMs: MAX_TIMER_DELAY_MS })
+      .toEqual({ requireAccessPolicy: false, websocketHeartbeatIntervalMs: MAX_TIMER_DELAY_MS })
     for (const websocketHeartbeatIntervalMs of [0, 1.5, MAX_TIMER_DELAY_MS + 1]) {
       expect(() => TypertGatewayService.Config({ websocketHeartbeatIntervalMs })).toThrow()
     }
@@ -920,6 +920,50 @@ describe('Typert Remote streams', () => {
     rejected.resume()
     ;(request as { abort(): void }).abort()
   })
+
+  it('requires deployment authority for direct HTTP and WebSocket carriers', async () => {
+    const { ctx } = await setup(true, { requireAccessPolicy: true })
+    const origin = `http://127.0.0.1:${String(ctx.webServer.port)}`
+    const headers = { cookie: browserCookie(ctx), 'content-type': 'application/json' }
+    const response = await fetch(`${origin}/api/feed/unary`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ type: 'client-request', rpcId: 'missing-authority', method: 'feed/unary', payload: { args: { label: 'private' } } }),
+    })
+    expect(await response.json()).toMatchObject({ result: { ok: false } })
+    const socket = new WebSocket(`${origin.replace('http:', 'ws:')}/api/remote.mux`, { headers })
+    socket.on('error', () => {})
+    const [request, rejected] = await once(socket, 'unexpected-response') as [{ abort(): void }, { statusCode: number; resume(): void }]
+    expect(rejected.statusCode).toBe(403)
+    rejected.resume()
+    request.abort()
+  })
+
+  it('passes original HTTP request facts into one finite native invocation lease', async () => {
+    const { ctx } = await setup(true, { requireAccessPolicy: true })
+    const calls: string[] = []
+    const released = vi.fn()
+    ctx.provide('gatewayAccess', {
+      async admit(request) {
+        expect(request.headers).toBeInstanceOf(Headers)
+        expect((request.headers as Headers).get('x-fixture-proof')).toBe('verified')
+        return {
+          signal: new AbortController().signal,
+          async check(operation) { calls.push(`check:${operation.endpoint}`) },
+          async run(_operation, dispatch) { calls.push('enter'); try { return await dispatch() } finally { calls.push('leave') } },
+          async project(_operation, value) { calls.push('project'); return { keep: true as const, value } },
+          release: released,
+        }
+      },
+    })
+    const response = await fetch(`http://127.0.0.1:${String(ctx.webServer.port)}/api/feed/unary`, {
+      method: 'POST', headers: { cookie: browserCookie(ctx), 'content-type': 'application/json', 'x-fixture-proof': 'verified' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'verified-authority', method: 'feed/unary', payload: { args: { label: 'preserved' } } }),
+    })
+    expect(await response.json()).toMatchObject({ result: { ok: true, value: 'preserved' } })
+    expect(calls).toEqual(['check:feed/unary', 'enter', 'leave', 'project'])
+    expect(released).toHaveBeenCalledOnce()
+  })
+
 })
 
 async function setup(

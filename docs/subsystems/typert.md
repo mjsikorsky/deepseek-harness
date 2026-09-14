@@ -4,6 +4,11 @@ English | [中文](typert.zh.md)
 
 Types shared by generated Remote artifacts, the Host Gateway, and consumer API assemblies. The [Typert Gateway Agent Note](../../.agents/notes/implemented/architecture/2026-08-02-typert-remote-method-calls.md) owns the architecture and transport decisions; this page records the literal public contracts from [`dsh-typert-protocol`](../../packages/typert/protocol/src/types.ts) and [`dsh-api-gateway`](../../packages/api/gateway/src/types.ts).
 
+Gateway can require `ctx.gatewayAccess`: `GatewayAccessProvider.admit()` receives the original carrier request and returns a finite `GatewayAccessLease`. Its `run`, `check`, `project`, `signal` and `release` operations compose authority with native dispatch, mux reads, event delivery and approval replies. This extension preserves generated codecs and the existing wire protocol; deployment plugins own identity and workspace policy.
+
+
+Connection separately admits every HTTP route through `ctx.connectionRequestPolicy` when configured as required. `ConnectionRequestPolicy.admit(request)` returns a `ConnectionRequestLease` whose `run`, `signal` and `release` retain resource authority through native dispatch and both body streams; raw file, upload and export handlers do not bypass it. This does not parse RPC bodies or replace Gateway operation checks.
+
 ## Lookup and Context declarations
 
 Business-object packages extend two empty maps through declaration merging. A lookup associates one Host object type with its wire identity; a Context declaration associates one scoped Context kind with its wire identity. Generated descriptors name these keys, while runtime providers supply the live resolution behavior.
@@ -241,6 +246,23 @@ interface TypertClientRemote extends TypertRemoteNamespaceMap {
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxgatewayaccess--gatewayaccessprovider"></a>
+
+### `ctx.gatewayAccess` — `GatewayAccessProvider`
+
+Trusted deployment provider; absence/denial is never a default identity.
+
+```ts cordis-catalog
+/**
+ * Verify carrier authority and capture its independently expiring lifetime.
+ * @param request - original request facts, including server-forwarded proof headers.
+ * @returns one owned lease, or undefined to deny the request.
+ */
+admit(request: GatewayCarrierRequest): Promise<GatewayAccessLease | undefined>
+```
+
+Source: [`packages/api/gateway/src/types.ts`](../../packages/api/gateway/src/types.ts)
 
 <a id="ctxtypert--typertregistry"></a>
 

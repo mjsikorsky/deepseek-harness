@@ -24,6 +24,10 @@ kind: "package-reference"
 <a id="host-service-typertgatewayservice-ctx-key-typertgateway"></a>
 ## Host 服务：`TypertGatewayService`（ctx key：`typertGateway`）
 
+浏览器外壳可以通过 Connection 提供 `ClientTransportHooks.openMuxSocket`。原生 mux 会在每次尝试时调用此物理套接字工厂；它可以等待新的准入证明，同时保留原生帧协议和重试所有权。取消会中止准备、关闭迟到的返回值，并在套接字丢失后结束传输生命周期。无需替换逻辑 `openStream` 传输。
+
+Host 部署可以提供 `ctx.gatewayAccess` 并设置 `requireAccessPolicy: true`。此时缺少或拒绝准入会拒绝网络 Remote 访问。提供者接收原始 HTTP 请求或 WebSocket 升级请求，为每个传输保持一个有期限的租约，并在分派前检查调用、流读取、`$events` 和 `$events/result`。它可以投影或隐藏结果，无需替换原生 RPC 编解码器或 mux 帧协议。租约取消会关闭套接字；隐藏的瀑布事件投递会从待处理投递记录中移除。默认值 `false` 保留独立 Host 的组合方式。此扩展不会授权其他 Connection 命名空间，也不会创建身份提供者。
+
 每次调用时，`ctx.typertGateway.invoke()` 都会解析当前的描述符和 Cordis 服务，校验具名参数是否完全匹配，解析已注册的对象或 Context 身份标识，调用公开的业务方法，并校验其结果。业务服务继承 [`dsh-typert-protocol`](../../typert/protocol/README.zh.md) 的 `TypertRemoteService`，并用 `@Remote` 或 `@RemoteScope` 标记方法；已有其他基类时仍可改用 `bindTypertRemote()`。
 
 严格模式从 `ctx.typert.local` 读取生成的调用描述符。查找参数使用 `ctx.typert.lookups` 中当前有效的解析器：业务包注册稳定声明与默认策略，Host 组合可用 effect-scoped `configure()` 覆盖解析行为；`@RemoteScope` 则通过已注册的 Host Context 适配器解析其接收者。SRC 模式是开发阶段的回退路径，适用于从未具备严格定义的端点；它解析简单参数名，并且只允许非查找参数使用可安全表示为 JSON 的值。已观测到的严格定义一旦撤回，系统会直接报错，而不会降低校验强度。
@@ -73,7 +77,7 @@ Host 组合可通过 `registerRemoteEvents()` 注册唯一的应用事件 source
 - Client 侧只能挂载严格模式生成的贡献项。SRC 标记不具备 Client 编解码器或类型投影。
 - `$stream()` 监督载体替换，但不推断回放语义；各领域自行拥有恢复 cursor 或替换 baseline 的校验，以及正常结束的分类。Connection generation 会重开内部 `$events` 流；单向通知不会重放，仍处于 pending 的 scoped waterfall 则沿用同一个 event id 重放。
 - lookup 解析器按 key 配置；当前无法让单个 Remote 参数或 endpoint 在同一 `agent`/`session` key 下选择 live-only 策略。
-- 被转发的事件到达 `$on` 时不做业务载荷投影或脱敏。普通通知在重连后不重放；Agent-scoped waterfall 只投影选择 Client Context 所需的顶层 Agent 身份，并自行携带 pending 生命周期。
+- 未安装部署访问提供者时，被转发的事件到达 `$on` 时不做业务载荷投影或脱敏。普通通知在重连后不重放；Agent-scoped waterfall 只投影选择 Client Context 所需的顶层 Agent 身份，并自行携带 pending 生命周期。
 - `websocketHeartbeatIntervalMs` 同时是 Ping 周期和 Pong 截止时间。对端未在下一周期前回复时，Host 会终止连接；如果部署的事件循环或网络可能停顿超过该间隔，必须调大此配置。
 
 
