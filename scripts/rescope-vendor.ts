@@ -116,6 +116,7 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   { file: 'packages/extensions/cordis-host-runner/src/index.ts', upstream: ['cordis'] },
   { file: 'packages/extensions/cordis-host-runner/src/inspect-registry.ts', upstream: ['cordis'] },
   { file: 'packages/extensions/cordis-host-runner/src/types.ts', upstream: ['cordis'] },
+  { file: 'packages/extensions/cordis-host-runner/tests/admission.spec.ts', upstream: ['cordis'] },
   { file: 'packages/extensions/cordis-host-runner/tests/helpers.ts', upstream: ['cordis'] },
   { file: 'packages/extensions/cordis-host-runner/tests/runner.spec.ts', upstream: ['cordis'] },
   { file: 'packages/extensions/cordis-host-runner/tests/versioning.spec.ts', upstream: ['cordis'] },
@@ -512,6 +513,17 @@ function rewrite(text: string, file: string, all: readonly Pattern[]): { text: s
     return next
   })
   return { text: out.join('\n'), lines }
+}
+
+/**
+ * Preview the generic package-name pass using the same mapping and site exceptions as the gate.
+ * @param text - Complete source text; this operation never writes the file.
+ * @param file - Repository-relative path used to select the owning site's rewrite policy.
+ * @param reverse - Whether to preview reversal of the package rescope.
+ * @returns Rewritten text and the number of changed lines.
+ */
+export function previewVendorRescope(text: string, file: string, reverse = false): { text: string; lines: number } {
+  return rewrite(text, file, patterns(reverse))
 }
 
 function classify(file: string): string {

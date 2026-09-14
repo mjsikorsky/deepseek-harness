@@ -4,8 +4,9 @@
  * rejected rather than applied again.
  */
 
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { exactEditState } from './rescope-vendor.ts'
+import { exactEditState, previewVendorRescope } from './rescope-vendor.ts'
 
 const ANCHOR = '\n## Sync procedure'
 const INSERTED = `\n15. **rescope**: one log entry.\n${ANCHOR}`
@@ -37,5 +38,25 @@ describe('exactEditState', () => {
     // A moved or partially applied site: neither state is complete.
     expect(exactEditState('a = 1\nb = 2\n', 'a = 1', 'b = 2', 1)).toBe('invalid')
     expect(exactEditState('x\n', 'a = 1', 'b = 2', 1)).toBe('invalid')
+  })
+})
+
+
+describe('native event sites', () => {
+  it('preserves the actual Host admission event assertions without exempting other packages or files', () => {
+    const file = 'packages/extensions/cordis-host-runner/tests/admission.spec.ts'
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+    const upstream = '@deepseek-ai/cordis'.slice('@deepseek-ai/'.length)
+    for (const event of [`${upstream}/request-run`, `${upstream}/request-run-resolved`]) {
+      expect(source).toContain(`'${event}'`)
+    }
+    expect(previewVendorRescope(source, file)).toEqual({ text: source, lines: 0 })
+    // The same source at an unrecognized site still fails the generic residue check.
+    expect(previewVendorRescope(source, 'unregistered.ts').lines).toBeGreaterThan(0)
+    const otherPackage = '@deepseek-ai/cosmokit'.slice('@deepseek-ai/'.length)
+    const importLine = `import value from '${otherPackage}'`
+    expect(previewVendorRescope(importLine, file)).toEqual({
+      text: "import value from '@deepseek-ai/cosmokit'", lines: 1,
+    })
   })
 })
