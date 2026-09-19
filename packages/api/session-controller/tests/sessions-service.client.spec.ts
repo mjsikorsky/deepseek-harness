@@ -1146,3 +1146,40 @@ describe('coverage tails (branch duals)', () => {
   })
 
 })
+
+
+describe('independent native presentation leases', () => {
+  it('opens two histories without moving selection and releases only its own removed view', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'left' }, { id: 'right' }])
+    const left = await b.svc.acquireView(sid('left'))
+    const leftAgain = await b.svc.acquireView(sid('left'))
+    const right = await b.svc.acquireView(sid('right'))
+    expect(b.svc.list.getSnapshot().current).toBeUndefined()
+    expect(left.binding).toBe(leftAgain.binding)
+    expect(b.api.activeFollows(sid('left'))).toBe(1)
+    expect(b.api.activeFollows(sid('right'))).toBe(1)
+    await feedList(b, [])
+    left.release()
+    left.release()
+    expect(b.svc.binding(sid('left'))).toBe(leftAgain.binding)
+    leftAgain.release()
+    await vi.waitFor(() => { expect(b.api.activeFollows(sid('left'))).toBe(0) })
+    expect(b.svc.binding(sid('right'))).toBe(right.binding)
+    expect(b.api.activeFollows(sid('right'))).toBe(1)
+    right.release()
+    await vi.waitFor(() => { expect(b.api.activeFollows(sid('right'))).toBe(0) })
+    await b.ctx.fiber.dispose()
+  })
+
+  it('does not admit an unlisted identity and releases safely after client disposal', async () => {
+    const b = bench()
+    await expect(b.svc.acquireView(sid('unknown'))).rejects.toThrow('not available')
+    await feedList(b, [{ id: 'held' }])
+    const held = await b.svc.acquireView(sid('held'))
+    await b.ctx.fiber.dispose()
+    held.release()
+    await expect(b.svc.acquireView(sid('held'))).rejects.toThrow('not available')
+    expect(b.api.activeFollows(sid('held'))).toBe(0)
+  })
+})

@@ -43,6 +43,13 @@ export interface ISessions {
    */
   open(id: SessionId): void
   /**
+   * Open an independent view without changing current selection.
+   * @param id - a currently authorized, native-listed session.
+   * @returns native binding and idempotent, detach-only release.
+   */
+  acquireView(id: SessionId): Promise<{ binding: SessionBinding; release(): void }>
+
+  /**
    * Open a healthy catalog child through its exact direct-parent address.
    * @param address - catalog-derived parent and child ids.
    */

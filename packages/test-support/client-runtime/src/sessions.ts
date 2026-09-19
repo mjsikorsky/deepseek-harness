@@ -205,6 +205,17 @@ export class TestSessions implements ISessions {
   /** The wire schema's `session.search` result bound (production parity). */
   readonly searchResultLimit = SESSION_SEARCH_RESULT_LIMIT
 
+  /** Test presentation binding; fixture lifetime remains owned by the bench.
+   * @param id - installed fixture identity.
+   * @returns the fixture binding without changing selection.
+   */
+  async acquireView(id: SessionId): Promise<{ binding: SessionBinding; release(): void }> {
+    const binding = this.binding(id)
+    if (binding === undefined) throw new Error('Fixture session is unavailable.')
+    return { binding, release() {} }
+  }
+
+
   /** Replaceable search behavior (see {@link TestSessions.stubSearch}). */
   private searchStub: ((query: string, signal: AbortSignal) => { items: SessionSearchResultItem[]; hasMore: boolean }) | undefined
   private createStub: ((opts: Parameters<ISessions['create']>[0]) => Promise<SessionId>) | undefined

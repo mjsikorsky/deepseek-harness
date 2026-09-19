@@ -96,9 +96,9 @@ export const inject = [
  * Install Client Session state and its reconnecting control stream.
  * @param ctx - Client Cordis context.
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: { persistSelection?: boolean } = {}): void {
   const remotes = ctx.remote as unknown as SessionRemotes
-  const sessions = new ClientSessions(ctx, remotes)
+  const sessions = new ClientSessions(ctx, remotes, config)
   ctx.remote.$on('api-session/added', (summary) => { sessions.handleSessionAdded(summary) })
   ctx.remote.$on('api-session/removed', (sessionId) => { sessions.handleSessionRemoved(sessionId) })
   ctx.remote.$on('api-session/status', (sessionId, running) => {

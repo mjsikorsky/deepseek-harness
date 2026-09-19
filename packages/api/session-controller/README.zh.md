@@ -24,6 +24,9 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+`ctx.sessions.acquireView(id)` 打开独立的原生 Session binding，不改变客户端当前选择的 Session。视图关闭时释放返回的租约；释放不会取消或删除 Host 工作。视图租约存在时，客户端保留已移出列表的 scope，并在客户端销毁时清理所有 scope。嵌入方可设置客户端插件的 `persistSelection: false`，避免把选择保存到整个来源共享的浏览器存储中。
+
+
 已安装的 `ctx.sessionVisibility` 提供者会在原生列表收集和搜索分页之前过滤 Session 身份。当不可访问的匹配项排在可读 Session 之前时，这能保留结果数量限制。提供者接收请求取消信号，并负责当前读取授权；它不会替换原生历史、搜索或 Session 生命周期行为。直接 Session 操作仍由部署访问提供者负责。
 
 历史页与 follow opening 快照为每个持久 Session 事件携带一条 `{ type: 'event', event: SessionWireEvent }` record。Client 把每条已接受 record 保留为一个持久 `SessionEventLikeEntry`；Assistant token 边界保留在 `assistant/message` 或 `assistant/attempt` 的紧凑流内。工具参数、结果内容、失败信息和 `tool/result.data.meta` 原样通过；控制器不解析工具定义、不运行展示转换器，也不附加 UI 数据。

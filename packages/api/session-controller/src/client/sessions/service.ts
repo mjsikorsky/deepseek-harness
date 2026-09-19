@@ -202,6 +202,8 @@ export class ClientSessions implements ISessions {
   private readonly selection: SnapshotStore<SessionSelection>
 
   private readonly scopes = new Map<SessionId, ScopeRecord>()
+  private readonly viewLeases = new Map<SessionId, number>()
+  private disposed = false
   /** In-flight scope drops remain here after records leave `scopes`, so root disposal can await quiescence. */
   private readonly scopeDrops = new Set<Promise<void>>()
   /**
@@ -221,10 +223,11 @@ export class ClientSessions implements ISessions {
   constructor(
     private readonly rootCtx: Context,
     remote: SessionRemotes,
+    options: { persistSelection?: boolean } = {},
   ) {
     this.selection = createSnapshotStore<SessionSelection>(
       {},
-      { persist: { name: 'dsh.sessions.current' } })
+      options.persistSelection === false ? undefined : { persist: { name: 'dsh.sessions.current' } })
     const restored = this.selection.getSnapshot()
     this.manager = new SessionManager(
       remote,
@@ -250,10 +253,12 @@ export class ClientSessions implements ISessions {
       this.followCurrent()
     })
     rootCtx.effect(() => async () => {
+      this.disposed = true
       disposeStageFollower()
       disposeManagerProjection()
       const scopes = [...this.scopes]
       this.scopes.clear()
+      this.viewLeases.clear()
       this.deferredRemovals.clear()
       this.watched = undefined
       for (const [id, record] of scopes) this.startScopeDrop(id, record)
@@ -511,6 +516,40 @@ export class ClientSessions implements ISessions {
   }
 
   /**
+   * Acquire an independent presentation of an already authorized session.
+   * Opening a view does not change the global navigation selection. Releasing
+   * it only relinquishes this view: it never cancels or deletes native work.
+   * @param id - session visible in the current native list or addressed route.
+   * @returns the binding and an idempotent presentation release.
+   */
+  async acquireView(id: SessionId): Promise<{ binding: SessionBinding; release(): void }> {
+    if (this.disposed || !this.eligible(id)) throw new Error('Session is not available in the current native list.')
+    const record = this.resolve(id)
+    if (record === undefined) throw new Error('Native session binding is unavailable.')
+    this.viewLeases.set(id, (this.viewLeases.get(id) ?? 0) + 1)
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true
+      if (this.disposed) return
+      const count = this.viewLeases.get(id) ?? 0
+      if (count <= 1) this.viewLeases.delete(id)
+      else this.viewLeases.set(id, count - 1)
+      this.pruneScopes()
+      this.sweepDeferred()
+    }
+    try {
+      await record.session.open()
+      if (this.disposed) throw new Error('Native client was disposed while opening the view.')
+      if (record.session.getSnapshot().openState !== 'open') throw new Error('Native session history could not be opened.')
+      return { binding: record.binding, release }
+    } catch (error) {
+      release()
+      throw error
+    }
+  }
+
+  /**
    * Move the stage to the list's current session: sweep teardowns deferred
    * behind the previous occupant and pull the new occupant's history window.
    * Staging IS the open signal — the window opens ⟺ the session is on stage
@@ -651,7 +690,7 @@ export class ClientSessions implements ISessions {
     if (this.list.getSnapshot().phase === 'pending') return
     for (const [id, record] of this.scopes) {
       if (this.eligible(id)) continue
-      if (id === this.watched) {
+      if (id === this.watched || this.viewLeases.has(id)) {
         this.deferredRemovals.add(id)
         continue
       }
@@ -699,7 +738,7 @@ export class ClientSessions implements ISessions {
       /* v8 ignore next -- defensive: only the staged id ever defers, and every
        * stage move sweeps first, so the set cannot contain the id the stage just
        * moved to; kept as a guard against future extra sweep call sites. */
-      if (id === this.watched) continue
+      if (id === this.watched || this.viewLeases.has(id)) continue
       // Eligible again? (A re-added id cancels the deferred teardown.)
       if (this.eligible(id)) {
         this.deferredRemovals.delete(id)

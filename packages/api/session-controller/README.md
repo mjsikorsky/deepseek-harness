@@ -24,6 +24,9 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
+`ctx.sessions.acquireView(id)` opens an independent native Session binding without changing the client's selected Session. Release the returned lease when its view closes; release does not cancel or delete Host work. The client retains removed scopes while a view lease exists and drains all scopes on client disposal. Embedders can set the client plugin's `persistSelection: false` to keep selection out of origin-wide browser storage.
+
+
 An installed `ctx.sessionVisibility` provider filters Session identities before native list collection and search pagination. This preserves result limits when inaccessible matches precede readable Sessions. The provider receives the request cancellation signal and owns current read authorization; it does not replace native history, search, or Session lifecycle behavior. Direct Session operations remain the deployment access provider’s responsibility.
 
 History pages and follow opening snapshots carry one `{ type: 'event', event: SessionWireEvent }` record per durable Session event. The Client retains each accepted record as one durable `SessionEventLikeEntry`; Assistant token boundaries remain inside the compact stream on `assistant/message` or `assistant/attempt`. Tool arguments, result content, failures, and `tool/result.data.meta` pass through unchanged; the controller does not resolve a Tool definition, run a presenter, or attach UI data.
