@@ -17,6 +17,7 @@ import type {
   SessionProjectionBaseline,
   SessionQueuedItem,
   SessionRequestId,
+  SessionWireHeader,
 } from '../../types.ts'
 import type {
   BeginSubmissionInput, PendingSubmissionRetirement, SessionFace, SubmissionHandle,
@@ -145,6 +146,7 @@ export class Session implements SessionFace {
 
   /** Contiguous history and live tail consumed by Conversation assembly. */
   readonly eventSource = new MutableSessionEventSource()
+  private nativeHeader: SessionWireHeader | undefined
   private snapshotCache: SessionSnapshot
   private readonly notifier: Notifier
   /**
@@ -636,6 +638,13 @@ export class Session implements SessionFace {
   private acceptEventChange(change: SessionJournalChange): void {
     switch (change.type) {
       case 'replace':
+        if (change.page.header !== undefined) {
+          const header = change.page.header
+          if (header.id !== this.sessionId || this.nativeHeader !== undefined && header.createdAt !== this.nativeHeader.createdAt) {
+            throw new RemoteError('gateway/internal', 'Native Session identity changed while its view was open.', {})
+          }
+          this.nativeHeader = Object.freeze({ ...header })
+        }
         this.installWindow(
           change.entries,
           change.hasMore,
@@ -795,6 +804,7 @@ export class Session implements SessionFace {
   private buildSnapshot(): SessionSnapshot {
     return {
       sessionId: this.sessionId,
+      ...(this.nativeHeader === undefined ? {} : { header: this.nativeHeader }),
       queue: this.queueMirror.snapshot(),
       pendingSubmissions: this.pendingSubmissions,
       running: this.running,

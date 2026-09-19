@@ -520,9 +520,11 @@ export class ClientSessions implements ISessions {
    * Opening a view does not change the global navigation selection. Releasing
    * it only relinquishes this view: it never cancels or deletes native work.
    * @param id - session visible in the current native list or addressed route.
+   * @param expectedCreatedAt - optional durable generation from the saved native reference.
    * @returns the binding and an idempotent presentation release.
    */
-  async acquireView(id: SessionId): Promise<{ binding: SessionBinding; release(): void }> {
+  async acquireView(id: SessionId, expectedCreatedAt?: number): Promise<{ binding: SessionBinding; release(): void }> {
+    if (expectedCreatedAt !== undefined && (!Number.isSafeInteger(expectedCreatedAt) || expectedCreatedAt < 0)) throw new Error('Invalid expected Session generation.')
     if (this.disposed || !this.eligible(id)) throw new Error('Session is not available in the current native list.')
     const record = this.resolve(id)
     if (record === undefined) throw new Error('Native session binding is unavailable.')
@@ -541,7 +543,9 @@ export class ClientSessions implements ISessions {
     try {
       await record.session.open()
       if (this.disposed) throw new Error('Native client was disposed while opening the view.')
-      if (record.session.getSnapshot().openState !== 'open') throw new Error('Native session history could not be opened.')
+      const snapshot = record.session.getSnapshot()
+      if (snapshot.openState !== 'open') throw new Error('Native session history could not be opened.')
+      if (expectedCreatedAt !== undefined && snapshot.header?.createdAt !== expectedCreatedAt) throw new Error('Native Session generation differs from the saved reference.')
       return { binding: record.binding, release }
     } catch (error) {
       release()

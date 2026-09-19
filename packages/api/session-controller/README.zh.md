@@ -24,7 +24,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-`ctx.sessions.acquireView(id)` 打开独立的原生 Session binding，不改变客户端当前选择的 Session。视图关闭时释放返回的租约；释放不会取消或删除 Host 工作。视图租约存在时，客户端保留已移出列表的 scope，并在客户端销毁时清理所有 scope。嵌入方可设置客户端插件的 `persistSelection: false`，避免把选择保存到整个来源共享的浏览器存储中。
+`ctx.sessions.acquireView(id, expectedCreatedAt?)` 打开独立的原生 Session binding，不改变客户端当前选择的 Session。视图关闭时释放返回的租约；释放不会取消或删除 Host 工作。视图租约存在时，客户端保留已移出列表的 scope，并在客户端销毁时清理所有 scope。嵌入方可设置客户端插件的 `persistSelection: false`，避免把选择保存到整个来源共享的浏览器存储中。
 
 
 已安装的 `ctx.sessionVisibility` 提供者会在原生列表收集和搜索分页之前过滤 Session 身份。当不可访问的匹配项排在可读 Session 之前时，这能保留结果数量限制。提供者接收请求取消信号，并负责当前读取授权；它不会替换原生历史、搜索或 Session 生命周期行为。直接 Session 操作仍由部署访问提供者负责。
@@ -91,3 +91,5 @@ Session 对象还承载本地提交回显：`session.beginSubmission` 在调用�
 </details>
 
 **运行时不变式：** 不发布伴生入口。每个分页与帧都会对照其指向的持久 Session 校验。
+
+恢复保存的视图时可传入原生 header 的创建时间，拒绝已被复用的 Session ID。原生快照包含 header；重连时若身份发生变化，会在替换已有事件窗口之前拒绝该快照。

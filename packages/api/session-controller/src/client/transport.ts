@@ -19,6 +19,7 @@ import type {
   SessionPage,
   SessionPageRequest,
   SessionProjectionBaseline,
+  SessionWireHeader,
 } from '../types.ts'
 import {
   historyEntries,
@@ -42,6 +43,7 @@ export type SessionRemote = ClientRemote['session']
 
 /** Opening metadata carried only by a follow snapshot, never by loadOlder pages. */
 interface SessionJournalPage extends SessionPage {
+  readonly header?: SessionWireHeader
   readonly projections?: SessionProjectionBaseline
   readonly assistantStream?: SessionAssistantStreamBaseline
 }
@@ -195,6 +197,7 @@ export class SessionEventStream extends RemoteJournalStream<
           type: 'opened',
           cursor: frame.cursor,
           page: {
+            header: frame.header,
             records: frame.records,
             hasMore: frame.hasMore,
             projections: frame.projections,

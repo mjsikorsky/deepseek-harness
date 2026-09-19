@@ -47,7 +47,7 @@ export interface ISessions {
    * @param id - a currently authorized, native-listed session.
    * @returns native binding and idempotent, detach-only release.
    */
-  acquireView(id: SessionId): Promise<{ binding: SessionBinding; release(): void }>
+  acquireView(id: SessionId, expectedCreatedAt?: number): Promise<{ binding: SessionBinding; release(): void }>
 
   /**
    * Open a healthy catalog child through its exact direct-parent address.

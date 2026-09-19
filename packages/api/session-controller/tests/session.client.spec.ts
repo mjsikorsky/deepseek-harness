@@ -792,6 +792,23 @@ describe('remaining branches', () => {
 })
 
 describe('resync', () => {
+  it('rejects a reused native session identity before replacing the open view', async ({ mock, start }) => {
+    const session = await sessionBench(mock, start, SID)
+    mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(0), 0, 'retained', 'work'))))
+    await session.open()
+    const before = session.eventSource.getSnapshot()
+    const generation = session.getSnapshot().header?.createdAt
+    expect(generation).toBeDefined()
+    mock.stream(FOLLOW, async ([request], stream) => {
+      const snapshot = followSnapshot(historyValue(plainTurn(SessionSeq(0), 0, 'replacement', 'identity')), request as SessionFollowRequest)
+      stream.push({ ...snapshot, header: { ...snapshot.header, createdAt: generation! + 1 } })
+    })
+    await session.resync()
+    expect(session.getSnapshot().openState).toBe('error')
+    expect(session.getSnapshot().header?.createdAt).toBe(generation)
+    expect(session.eventSource.getSnapshot()).toBe(before)
+  })
+
   it('keeps the old feed until the reconnect snapshot, then repairs queued live gaps', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
     mock.stream(FOLLOW, followScript(history(plainTurn(SessionSeq(0), 0, '旧', '窗'))))

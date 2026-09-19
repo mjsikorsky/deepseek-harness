@@ -24,7 +24,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-`ctx.sessions.acquireView(id)` opens an independent native Session binding without changing the client's selected Session. Release the returned lease when its view closes; release does not cancel or delete Host work. The client retains removed scopes while a view lease exists and drains all scopes on client disposal. Embedders can set the client plugin's `persistSelection: false` to keep selection out of origin-wide browser storage.
+`ctx.sessions.acquireView(id, expectedCreatedAt?)` opens an independent native Session binding without changing the client's selected Session. Release the returned lease when its view closes; release does not cancel or delete Host work. The client retains removed scopes while a view lease exists and drains all scopes on client disposal. Embedders can set the client plugin's `persistSelection: false` to keep selection out of origin-wide browser storage.
 
 
 An installed `ctx.sessionVisibility` provider filters Session identities before native list collection and search pagination. This preserves result limits when inaccessible matches precede readable Sessions. The provider receives the request cancellation signal and owns current read authorization; it does not replace native history, search, or Session lifecycle behavior. Direct Session operations remain the deployment access provider’s responsibility.
@@ -91,3 +91,5 @@ None.
 </details>
 
 **Runtime invariant:** No companion is published. Every page and frame is checked against the addressed durable Session.
+
+Saved views may pass the native header creation time to reject a reused Session ID. The native snapshot exposes its header, and a changed header identity on reconnect is rejected before replacing the retained event window.

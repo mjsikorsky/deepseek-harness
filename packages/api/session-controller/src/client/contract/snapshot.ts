@@ -5,7 +5,7 @@ import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type { RemoteFailure } from '@deepseek-ai/dsh-typert-protocol'
-import type { SessionRequestId } from '../../types.ts'
+import type { SessionRequestId, SessionWireHeader } from '../../types.ts'
 
 /** One transient inbox occurrence from the authoritative queue snapshot. */
 export interface QueuedMessage {
@@ -81,6 +81,8 @@ export interface PromptError {
 
 /** Immutable Session lifecycle and control snapshot. */
 export interface SessionSnapshot {
+  /** Native follow-opening identity, absent until history opens. */
+  readonly header?: SessionWireHeader
   readonly sessionId: SessionId
   readonly queue: readonly QueuedMessage[]
   /** Local prompt-submission echoes not yet observed as durable events or queue occurrences. */

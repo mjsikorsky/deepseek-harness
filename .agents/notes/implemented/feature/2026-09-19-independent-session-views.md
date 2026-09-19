@@ -10,7 +10,7 @@ An embedding application can display several Sessions at once. Calling the selec
 
 ## Decision
 
-Session Controller exposes `acquireView(id)`, returning its existing native binding and an idempotent release operation. Only eligible listed Sessions can acquire a new view. Leases retain removed scopes until the last view releases; client disposal drains all scopes. An optional client `persistSelection: false` configuration leaves selection storage to the embedding application. The default remains unchanged.
+Session Controller exposes `acquireView(id, expectedCreatedAt?)`, returning its existing native binding and an idempotent release operation. Only eligible listed Sessions can acquire a new view. Leases retain removed scopes until the last view releases; client disposal drains all scopes. An optional client `persistSelection: false` configuration leaves selection storage to the embedding application. The default remains unchanged.
 
 ## Alternatives considered
 
@@ -21,3 +21,5 @@ Session Controller exposes `acquireView(id)`, returning its existing native bind
 ## Consequences
 
 Closing a view releases client resources without cancelling or deleting Host work. A held view is not authority to acquire another view of an unavailable Session. The owning client tests cover independent acquisition, release, selection and disposal. This change does not implement an embedding application's admission or resource authorization.
+
+Saved views may pass the native header creation time to reject a reused Session ID. The native snapshot exposes its header, and a changed header identity on reconnect is rejected before replacing the retained event window.
